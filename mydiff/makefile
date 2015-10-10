@@ -14,7 +14,5 @@ mydiff: $(OBJECTFILES)
 $.o: $.c
 	$(CC) $(CFLAGS) -c -o $@ $<
 
-mydiff.o: mydiff.c
-
 clean:
 	rm -f $(OBJECTFILES) mydiff
