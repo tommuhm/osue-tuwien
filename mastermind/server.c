@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012 OSUE Team <osue-team@vmars.tuwien.ac.at>
+ * Copyright (c) 2012-2015 OSUE Team <osue-team@vmars.tuwien.ac.at>
  *
  * Permission to use, copy, modify, and distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -13,7 +13,8 @@
  * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *
- * gcc -std=c99 -Wall -g -pedantic -DENDEBUG -D_BSD_SOURCE -D_XOPEN_SOURCE=500 -o server server.c
+ * gcc -std=c99 -Wall -g -pedantic -DENDEBUG \
+ *      -D_BSD_SOURCE -D_XOPEN_SOURCE=500 -o server server.c
  */
 
 #include <stdio.h>
@@ -72,8 +73,8 @@ static int sockfd = -1;
 /* File descriptor for connection socket */
 static int connfd = -1;
 
-/* This variable is set to ensure cleanup is performed only once */
-volatile sig_atomic_t terminating = 0;
+/* This variable is set upon receipt of a signal */
+volatile sig_atomic_t quit = 0;
 
 
 /* === Type Definitions === */
@@ -96,8 +97,8 @@ static void parse_args(int argc, char **argv, struct opts *options);
 
 /**
  * @brief Read message from socket
- * 
- * This code *illustrates* one way to deal with partial reads 
+ *
+ * This code *illustrates* one way to deal with partial reads
  *
  * @param sockfd_con Socket to read from
  * @param buffer Buffer where read data is stored
@@ -117,10 +118,10 @@ static int compute_answer(uint16_t req, uint8_t *resp, uint8_t *secret);
 
 /**
  * @brief terminate program on program error
- * @param eval exit code
+ * @param exitcode exit code
  * @param fmt format string
  */
-static void bail_out(int eval, const char *fmt, ...);
+static void bail_out(int exitcode, const char *fmt, ...);
 
 /**
  * @brief Signal handler
@@ -142,7 +143,7 @@ static uint8_t *read_from_client(int fd, uint8_t *buffer, size_t n)
     size_t bytes_recv = 0;
     do {
         ssize_t r;
-        r = read(fd, buffer + bytes_recv, n - bytes_recv);
+        r = recv(fd, buffer + bytes_recv, n - bytes_recv, 0);
         if (r <= 0) {
             return NULL;
         }
@@ -207,7 +208,7 @@ static int compute_answer(uint16_t req, uint8_t *resp, uint8_t *secret)
     }
 }
 
-static void bail_out(int eval, const char *fmt, ...)
+static void bail_out(int exitcode, const char *fmt, ...)
 {
     va_list ap;
 
@@ -218,26 +219,16 @@ static void bail_out(int eval, const char *fmt, ...)
         va_end(ap);
     }
     if (errno != 0) {
-        (void) fprintf(stderr, ": %s", strerror(errno));        
+        (void) fprintf(stderr, ": %s", strerror(errno));
     }
     (void) fprintf(stderr, "\n");
 
     free_resources();
-    exit(eval);
+    exit(exitcode);
 }
 
 static void free_resources(void)
 {
-    sigset_t blocked_signals;
-    (void) sigfillset(&blocked_signals);
-    (void) sigprocmask(SIG_BLOCK, &blocked_signals, NULL);
-
-    /* signals need to be blocked here to avoid race */
-    if(terminating == 1) {
-        return;
-    }
-    terminating = 1;
-
     /* clean up resources */
     DEBUG("Shutting down server\n");
     if(connfd >= 0) {
@@ -250,10 +241,7 @@ static void free_resources(void)
 
 static void signal_handler(int sig)
 {
-    /* signals need to be blocked by sigaction */
-    DEBUG("Caught Signal\n");
-    free_resources();
-    exit(EXIT_SUCCESS);
+    quit = 1;
 }
 
 /**
@@ -268,27 +256,26 @@ int main(int argc, char *argv[])
 {
 
     struct opts options;
-    sigset_t blocked_signals;
     int round;
     int ret;
-    
+
     parse_args(argc, argv, &options);
 
     /* setup signal handlers */
-    if(sigfillset(&blocked_signals) < 0) {
+    const int signals[] = {SIGINT, SIGTERM};
+    struct sigaction s;
+
+    s.sa_handler = signal_handler;
+    s.sa_flags   = 0;
+    if(sigfillset(&s.sa_mask) < 0) {
         bail_out(EXIT_FAILURE, "sigfillset");
-    } else {
-        const int signals[] = { SIGINT, SIGQUIT, SIGTERM };
-        struct sigaction s;
-        s.sa_handler = signal_handler;
-        (void) memcpy(&s.sa_mask, &blocked_signals, sizeof(s.sa_mask));
-        s.sa_flags   = SA_RESTART;
-        for(int i = 0; i < COUNT_OF(signals); i++) {
-            if (sigaction(signals[i], &s, NULL) < 0) {
-                bail_out(EXIT_FAILURE, "sigaction");
-            }
+    }
+    for(int i = 0; i < COUNT_OF(signals); i++) {
+        if (sigaction(signals[i], &s, NULL) < 0) {
+            bail_out(EXIT_FAILURE, "sigaction");
         }
     }
+
 
 
     /* Create a new TCP/IP socket `sockfd`, and set the SO_REUSEADDR
@@ -298,9 +285,10 @@ int main(int argc, char *argv[])
     */
     #error "insert your code here"
 
+
     /* accepted the connection */
     ret = EXIT_SUCCESS;
-    for (round = 1; round <= MAX_TRIES; ++round) {
+    for (round = 1; round <= MAX_TRIES && !quit; ++round) {
         uint16_t request;
         static uint8_t buffer[BUFFER_BYTES];
         int correct_guesses;
@@ -308,6 +296,7 @@ int main(int argc, char *argv[])
 
         /* read from client */
         if (read_from_client(connfd, &buffer[0], READ_BYTES) == NULL) {
+            if (quit) break; /* caught signal */
             bail_out(EXIT_FAILURE, "read_from_client");
         }
         request = (buffer[1] << 8) | buffer[0];
@@ -365,8 +354,9 @@ static void parse_args(int argc, char **argv, struct opts *options)
     if(argc > 0) {
         progname = argv[0];
     }
-    if (argc < 3) {
-        bail_out(EXIT_FAILURE, "Usage: %s <server-port> <secret-sequence>", progname);
+    if (argc != 3) {
+        bail_out(EXIT_FAILURE,
+            "Usage: %s <server-port> <secret-sequence>", progname);
     }
     port_arg = argv[1];
     secret_arg = argv[2];
@@ -374,7 +364,8 @@ static void parse_args(int argc, char **argv, struct opts *options)
     errno = 0;
     options->portno = strtol(port_arg, &endptr, 10);
 
-    if ((errno == ERANGE && (options->portno == LONG_MAX || options->portno == LONG_MIN))
+    if ((errno == ERANGE &&
+          (options->portno == LONG_MAX || options->portno == LONG_MIN))
         || (errno != 0 && options->portno == 0)) {
         bail_out(EXIT_FAILURE, "strtol");
     }
@@ -385,8 +376,9 @@ static void parse_args(int argc, char **argv, struct opts *options)
 
     /* If we got here, strtol() successfully parsed a number */
 
-    if (*endptr != '\0') { /* In principal not necessarily an error... */
-        bail_out(EXIT_FAILURE, "Further characters after <server-port>: %s", endptr);
+    if (*endptr != '\0') { /* In principle not necessarily an error... */
+        bail_out(EXIT_FAILURE,
+            "Further characters after <server-port>: %s", endptr);
     }
 
     /* check for valid port range */
@@ -396,7 +388,8 @@ static void parse_args(int argc, char **argv, struct opts *options)
     }
 
     if (strlen(secret_arg) != SLOTS) {
-        bail_out(EXIT_FAILURE, "<secret-sequence> has to be %d chars long", SLOTS);
+        bail_out(EXIT_FAILURE,
+            "<secret-sequence> has to be %d chars long", SLOTS);
     }
 
     /* read secret */
@@ -428,7 +421,8 @@ static void parse_args(int argc, char **argv, struct opts *options)
             color = white;
             break;
         default:
-            bail_out(EXIT_FAILURE, "Bad Color '%c' in <secret-sequence>", secret_arg[i]);
+            bail_out(EXIT_FAILURE,
+                "Bad Color '%c' in <secret-sequence>", secret_arg[i]);
         }
         options->secret[i] = color;
     }
