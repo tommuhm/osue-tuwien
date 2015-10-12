@@ -283,8 +283,31 @@ int main(int argc, char *argv[])
        listen, and wait for new connections, which should be assigned to
        `connfd`. Terminate the program in case of an error.
     */
-    #error "insert your code here"
+    // #error "insert your code here"
+    // TODO SO_RESUSEADDR -> siehe folien
 
+    if ((sockfd = socket(AF_INET, SOCK_STREAM, 0)) < 0) {
+      (void) fprintf(stderr, "Socket creation failed\n");
+      return -1;
+    }
+    
+    struct sockaddr_in server_addr;
+    server_addr.sin_family=AF_INET;
+    server_addr.sin_addr.s_addr=INADDR_ANY;
+    server_addr.sin_port=htons(options.portno);
+
+    if (bind(sockfd, (struct sockaddr *) &server_addr, sizeof(server_addr)) < 0) {
+      (void) fprintf(stderr, "Could not bind to port\n");
+      return -1;
+    }
+    
+    if (listen(sockfd, 5) < 0) {
+      (void) fprintf(stderr, "Could not set socket to passive\n");
+      (void) close(sockfd);
+      return -1;
+    }
+    
+    connfd = accept(sockfd, (struct sockaddr*) &server_addr, (socklen_t *) &server_addr);
 
     /* accepted the connection */
     ret = EXIT_SUCCESS;
@@ -301,6 +324,7 @@ int main(int argc, char *argv[])
         }
         request = (buffer[1] << 8) | buffer[0];
         DEBUG("Round %d: Received 0x%x\n", round, request);
+        printf("Round %d: Received 0x%x\n", round, request);
 
         /* compute answer */
         correct_guesses = compute_answer(request, buffer, options.secret);
@@ -311,7 +335,10 @@ int main(int argc, char *argv[])
         DEBUG("Sending byte 0x%x\n", buffer[0]);
 
         /* send message to client */
-        #error "insert your code here"
+        //#error "insert your code here"
+
+        
+
 
         /* We sent the answer to the client; now stop the game
            if its over, or an error occured */
