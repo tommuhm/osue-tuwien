@@ -50,6 +50,8 @@
 
 #define BACKLOG (5)
 
+// #define ENDEBUG
+
 
 /* === Macros === */
 
@@ -95,6 +97,9 @@ struct opts {
  */
 static void parse_args(int argc, char **argv, struct opts *options);
 
+// TODO
+static int write_to_client(int sockfd_con, uint8_t *buffer, size_t n);
+
 /**
  * @brief Read message from socket
  *
@@ -137,6 +142,26 @@ static void free_resources(void);
 
 /* === Implementations === */
 
+// TODO return type
+static int write_to_client(int fd, uint8_t *buffer, size_t n) 
+{
+  size_t bytes_sent = 0;
+  do {
+    ssize_t s;
+    s = send(fd, buffer + bytes_sent, n - bytes_sent, 0);
+    if (s <= 0) {
+      return -1;
+    }
+    bytes_sent += s;
+  } while (bytes_sent < n);
+  
+  if (bytes_sent < n) {
+    return -1;
+  }
+  
+  return 0;
+}
+
 static uint8_t *read_from_client(int fd, uint8_t *buffer, size_t n)
 {
     /* loop, as packet can arrive in several partial reads */
@@ -162,7 +187,7 @@ static int compute_answer(uint16_t req, uint8_t *resp, uint8_t *secret)
     int guess[COLORS];
     uint8_t parity_calc, parity_recv;
     int red, white;
-    int j;
+    int j;   
 
     parity_recv = (req >> 15) & 1;
 
@@ -276,8 +301,6 @@ int main(int argc, char *argv[])
         }
     }
 
-
-
     /* Create a new TCP/IP socket `sockfd`, and set the SO_REUSEADDR
        option for this socket. Then bind the socket to localhost:portno,
        listen, and wait for new connections, which should be assigned to
@@ -324,8 +347,7 @@ int main(int argc, char *argv[])
         }
         request = (buffer[1] << 8) | buffer[0];
         DEBUG("Round %d: Received 0x%x\n", round, request);
-        printf("Round %d: Received 0x%x\n", round, request);
-
+        
         /* compute answer */
         correct_guesses = compute_answer(request, buffer, options.secret);
         if (round == MAX_TRIES && correct_guesses != SLOTS) {
@@ -337,9 +359,15 @@ int main(int argc, char *argv[])
         /* send message to client */
         //#error "insert your code here"
 
-        
-
-
+        // send resp object to client
+       
+       
+        // TODO error handling 
+        if (write_to_client(connfd, &buffer[0], WRITE_BYTES) != 0) {
+          (void) fprintf(stderr, "write error");
+          //TODO
+        }
+                
         /* We sent the answer to the client; now stop the game
            if its over, or an error occured */
         if (*buffer & (1<<PARITY_ERR_BIT)) {
@@ -360,11 +388,12 @@ int main(int argc, char *argv[])
             break;
         } else if (correct_guesses == SLOTS) {
             /* won */
-            (void) printf("Runden: %d\n", round);
+            // TODO remove debug output
+            (void) printf("Runden: %d %s\n", round, argv[2]);
             break;
         }
     }
-
+    
     /* we are done */
     free_resources();
     return ret;
