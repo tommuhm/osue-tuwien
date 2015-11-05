@@ -33,13 +33,6 @@ static void bail_out(FILE *file1, FILE *file, int exit_code, char *argv[]);
   */
 static void print_error_code(char *filename, int errorno);
 
-/** 
- * mydiff file1 file2
- *
- * compares file1 and file2 line by line
- * prints a message for each line where differenzen where found
- *
- */
 int main(int argc, char *argv[]) {
 
   // line buffer for each file

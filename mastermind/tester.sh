@@ -10,7 +10,7 @@ while read -r code
 do
 	#echo $i;
 	((port++));
-	./server $port $code >> output.txt &
+	./server $port $code &
 	#sleep 1
 	./client localhost $port > /dev/null 2>&1 &
 	

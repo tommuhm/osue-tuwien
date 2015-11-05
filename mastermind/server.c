@@ -1,4 +1,19 @@
-/*
+/** 
+ *  mastermind-server
+ *
+ *  @author Thomas Muhm
+ *
+ *  @brief start a mastermind server a specified solutin which listens to client guesses
+ *
+ *  @details 
+ *    start a mastermind server with a specified solution and port
+ *    listen for client guesses on a socket
+ *    returns the number of red and white pins for each received guess
+ *    returns a game over message after 35 guesses and shuts down  
+ *
+ *  @date 17.10.2015
+ *
+ *
  * Copyright (c) 2012-2015 OSUE Team <osue-team@vmars.tuwien.ac.at>
  *
  * Permission to use, copy, modify, and distribute this software for any
@@ -97,7 +112,16 @@ struct opts {
  */
 static void parse_args(int argc, char **argv, struct opts *options);
 
-// TODO
+/**
+ * @brief Write message to socket
+ *
+ * This code *illustrates* one way to deal with partial writes
+ *
+ * @param sockfd_con Socket to write to
+ * @param buffer Buffer for data to be sent
+ * @param n Size to write
+ * @return 0 on success and -1 on error
+ */
 static int write_to_client(int sockfd_con, uint8_t *buffer, size_t n);
 
 /**
@@ -142,7 +166,6 @@ static void free_resources(void);
 
 /* === Implementations === */
 
-// TODO return type
 static int write_to_client(int fd, uint8_t *buffer, size_t n) 
 {
   size_t bytes_sent = 0;
@@ -158,7 +181,6 @@ static int write_to_client(int fd, uint8_t *buffer, size_t n)
   if (bytes_sent < n) {
     return -1;
   }
-  
   return 0;
 }
 
@@ -275,7 +297,8 @@ static void signal_handler(int sig)
  * @param argv The argument vector
  * @return EXIT_SUCCESS on success, EXIT_PARITY_ERROR in case of an parity
  * error, EXIT_GAME_LOST in case client needed to many guesses,
- * EXIT_MULTIPLE_ERRORS in case multiple errors occured in one round
+ * EXIT_MULTIPLE_ERRORS in case multiple errors occured in one round,
+ * EXIT_FAILURE if socket creation failed
  */
 int main(int argc, char *argv[])
 {
@@ -306,31 +329,43 @@ int main(int argc, char *argv[])
        listen, and wait for new connections, which should be assigned to
        `connfd`. Terminate the program in case of an error.
     */
-    // #error "insert your code here"
-    // TODO SO_RESUSEADDR -> siehe folien
-
+    
+    
+    /* create socket and set options */
     if ((sockfd = socket(AF_INET, SOCK_STREAM, 0)) < 0) {
       (void) fprintf(stderr, "Socket creation failed\n");
-      return -1;
+      return EXIT_FAILURE;
     }
     
+    int optval = 1;
+    setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, &optval, sizeof optval);
+    
+    /* bind socket to port and address */
     struct sockaddr_in server_addr;
     server_addr.sin_family=AF_INET;
     server_addr.sin_addr.s_addr=INADDR_ANY;
     server_addr.sin_port=htons(options.portno);
-
+    
     if (bind(sockfd, (struct sockaddr *) &server_addr, sizeof(server_addr)) < 0) {
       (void) fprintf(stderr, "Could not bind to port\n");
-      return -1;
+      free_resources();
+      return EXIT_FAILURE;
     }
-    
+
+    /* start listening for clients */    
     if (listen(sockfd, 5) < 0) {
       (void) fprintf(stderr, "Could not set socket to passive\n");
-      (void) close(sockfd);
-      return -1;
+      free_resources();
+      return EXIT_FAILURE;
     }
     
+    /* accept a incoming client connection */
     connfd = accept(sockfd, (struct sockaddr*) &server_addr, (socklen_t *) &server_addr);
+    if (connfd < 0) {
+      (void) fprintf(stderr, "Accept socket failed\n");
+      free_resources();
+      return EXIT_FAILURE;
+    }
 
     /* accepted the connection */
     ret = EXIT_SUCCESS;
@@ -357,15 +392,9 @@ int main(int argc, char *argv[])
         DEBUG("Sending byte 0x%x\n", buffer[0]);
 
         /* send message to client */
-        //#error "insert your code here"
-
-        // send resp object to client
-       
-       
-        // TODO error handling 
         if (write_to_client(connfd, &buffer[0], WRITE_BYTES) != 0) {
-          (void) fprintf(stderr, "write error");
-          //TODO
+            if (quit) break; /* caught signal */
+            bail_out(EXIT_FAILURE, "write_to_client");
         }
                 
         /* We sent the answer to the client; now stop the game
@@ -388,8 +417,7 @@ int main(int argc, char *argv[])
             break;
         } else if (correct_guesses == SLOTS) {
             /* won */
-            // TODO remove debug output
-            (void) printf("Runden: %d %s\n", round, argv[2]);
+            (void) printf("Runden: %d\n", round);
             break;
         }
     }
@@ -477,6 +505,7 @@ static void parse_args(int argc, char **argv, struct opts *options)
             color = white;
             break;
         default:
+            color = '\n'; // silence compiler warning
             bail_out(EXIT_FAILURE,
                 "Bad Color '%c' in <secret-sequence>", secret_arg[i]);
         }

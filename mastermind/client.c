@@ -1,3 +1,35 @@
+/** 
+ *  mastermind-client
+ *
+ *  @author Thomas Muhm
+ *
+ *  @brief starts a mastermind client which connects to the specified server and tries to solve the secret
+ *
+ *  @details 
+ *    client connects to the specified masermind server 
+ *    uses the first steps from the knuth alorithem to solve the secret most of the time in under 8 steps
+ *
+ *  @date 17.10.2015
+ *
+ *
+ * Copyright (c) 2012-2015 OSUE Team <osue-team@vmars.tuwien.ac.at>
+ *
+ * Permission to use, copy, modify, and distribute this software for any
+ * purpose with or without fee is hereby granted, provided that the above
+ * copyright notice and this permission notice appear in all copies.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+ * WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+ * MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
+ * ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+ * WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
+ * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
+ * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+ *
+ * gcc -std=c99 -Wall -g -pedantic -DENDEBUG \
+ *      -D_BSD_SOURCE -D_XOPEN_SOURCE=500 -o server server.c
+ */
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/socket.h>
@@ -18,11 +50,11 @@
 #define SHIFT_WIDTH (3)
 #define PARITY_BIT (15)
 
-#define ENDDEBUG
+// #define ENDEBUG
 
 /* === Macros === */
 
-#ifdef ENDDEBUG
+#ifdef ENDEBUG
 #define DEBUG(...) do { fprintf(stderr, __VA_ARGS__); } while(0)
 #else
 #define DEBUG(...)
@@ -55,26 +87,22 @@ static void print_binary(int guess, int slots);
 
 static void print_buffer(uint8_t *buffer, size_t n);
 
-static void calc_score(uint16_t guess,bool solutions[], int n, int red_guess, int white_guess);
+static void int_to_code(char *code, int guess, int slots);
+
+static void calc_score(uint16_t guess, int *solutions, int n, int red_guess, int white_guess);
 
 static void free_resources(void);
 
+/**
+ * @brief Program entry point
+ * @param argc The argument counter
+ * @param argv The argument vector
+ * @return EXIT_SUCCESS on success, EXIT_PARITY_ERROR in case of an parity
+ * error, EXIT_GAME_LOST in case client needed to many guesses,
+ * EXIT_MULTIPLE_ERRORS in case multiple errors occured in one round,
+ * EXIT_FAILURE if socket creation failed
+ */
 int main(int argc, char *argv[]) {
-
-  /*
-  uint8_t send_buffer = generate_code();
-
-  printf("lala: ");  
-  for (int i = 7; i >= 0; i--) {
-    fprintf(stdout, "%i", (send_buffer >> i) & 1);
-  }
-  
-  send_buffer = generate_code() >> 8;
-  printf("\nlala2: ");  
-  for (int i = 7; i >= 0; i--) {
-    fprintf(stdout, "%i", (send_buffer >> i) & 1);
-  }
-  */
 
   struct opts options;
   int err;
@@ -133,8 +161,13 @@ int main(int argc, char *argv[]) {
   
 
   int solutions_max = pow(COLORS,SLOTS);
-  bool solutions[solutions_max];
-  uint16_t guess = (beige << 4*SHIFT_WIDTH) | (beige << 3*SHIFT_WIDTH) | (darkblue << 2*SHIFT_WIDTH) | (darkblue << SHIFT_WIDTH) | green;
+  int solutions[solutions_max];
+  memset(solutions, 0, sizeof(int) * solutions_max);
+//  uint16_t guess = (beige << 4*SHIFT_WIDTH) | (beige << 3*SHIFT_WIDTH) | (darkblue << 2*SHIFT_WIDTH) | (darkblue << SHIFT_WIDTH) | green;
+
+  uint16_t guess = (beige << 4*SHIFT_WIDTH) | (beige << 3*SHIFT_WIDTH) | (darkblue << 2*SHIFT_WIDTH) | (red << SHIFT_WIDTH) | green;
+  
+
   
   int end = 0;
   int rounds = 1;
@@ -158,7 +191,11 @@ int main(int argc, char *argv[]) {
   
   
     (void) fprintf(stdout, "Calc guess: ");
-    (void) print_buffer(buffer, WRITE_BYTES);
+//    (void) print_buffer(buffer, WRITE_BYTES);
+    
+    char code[SLOTS];
+    int_to_code(code, guess, SLOTS);
+    (void) fprintf(stdout, "%s\n", code); 
   
     if (write_to_server(sockfd, buffer, WRITE_BYTES) != 0) {
       bail_out(EXIT_FAILURE, "write_to_server");
@@ -195,36 +232,36 @@ int main(int argc, char *argv[]) {
     
     // next guess
     int active = 0;
-    for (int i = 0; i < solutions_max; i++) {
+    for (int i = solutions_max-1; i >= 0; --i) {
       if (solutions[i] == 0) {
         active++;
         guess = i;
+        break;
       }
     }
-    for (int i = 0; i < solutions_max; i++) {
-      if (solutions[i] == 0) {
-        active++;
-        guess = i;
-      }
-    }
+    //(void) fprintf(stdout, "found %i active solutions\n", active);
+    
+  //  int j = 0;
+  //  for (int i = 0; i < solutions_max; i++) {
+  //    if (solutions[i] == 0) {
+  //      j++;
+  //      if (j == active) {
+  //        guess = i;
+  //        break;
+  //      }
+  //    }  
+  //  }
+    
+  //  int i = 0;
+   // while (i < active) {
+    //  if (solutions[i] == 0) {
+      //  i++; 
+   //   }
+   // }
+   // guess = i;
     
     rounds++;
-    // TODO testing
-    //end = 1;
   }
-
-
-
-
-
-//  if (read_from_server(sockfd, &buffer[0], READ_BYTES) == NULL) {
-  //  //if (quit) break; /* caught signal */
-    //bail_out(EXIT_FAILURE, "read_from_server");
-//  }
-//  request = (buffer[1] << 8) | buffer[0];
-  
-  //  DEBUG("Round %d: Received 0x%x\n", round, request); 
- 
   
   free_resources();
   
@@ -233,7 +270,7 @@ int main(int argc, char *argv[]) {
   return 0;
 }
 
-static void calc_score(uint16_t guess,bool solutions[], int n, int red_guess, int white_guess) {
+static void calc_score(uint16_t guess, int *solutions, int n, int red_guess, int white_guess) {
   int red, white;
   int colors_left[COLORS];
   int k = 0;
@@ -252,6 +289,7 @@ static void calc_score(uint16_t guess,bool solutions[], int n, int red_guess, in
           red++;
         } else {
           colors_left[guess_color]++;
+          //colors_left[sol_color]++;
         }
       }
       for (int j = 0; j < SLOTS; j++) {
@@ -259,9 +297,11 @@ static void calc_score(uint16_t guess,bool solutions[], int n, int red_guess, in
         int sol_color = (sol >> (j * SHIFT_WIDTH)) & 7;
         // white colors
         if (guess_color != sol_color) {
-          if (colors_left[sol_color] > 0) {
+          //if (colors_left[guess_color] > 0) {
+           if (colors_left[sol_color] > 0) {
             white++;
             colors_left[sol_color]--;
+//            colors_left[guess_color]--;
           }
         }
       }
@@ -274,15 +314,61 @@ static void calc_score(uint16_t guess,bool solutions[], int n, int red_guess, in
       
 
       if (red != red_guess || white != white_guess) {
+        char code[SLOTS];
+        int_to_code(code, sol, SLOTS);
+        int test = strncmp("bbbgw",code, 4);
+        if (sol == 30208) {
+          (void) fprintf(stdout, "ADSASDASDASDADSSADASDASDD");
+        }
+        if (test == 0) {
+          (void) fprintf(stdout, "NOOOOOOOOOOOOO SOL ELIMINATED - %s - %i\n", code, sol);
+        }
         solutions[sol] = 1;
-        k++;     
+        k++;      
       }
+      
 
     }   
     
   }
   //TODO (void) fprintf(stdout, "eliminated: %i\n", k);
 }
+
+static void int_to_code(char *code, int guess, int n) 
+{
+  //char code[n];
+  for (int i = 0; i < n; i++) {
+    switch ((guess >> i*SHIFT_WIDTH) & 7) {
+      case beige:
+        code[i] = 'b';
+        break;
+      case darkblue:
+        code[i] = 'd';
+        break;
+      case green:
+        code[i] = 'g';
+        break;
+      case orange:
+        code[i] = 'o';
+        break;
+      case red:
+        code[i] = 'r';
+        break;
+      case black:
+        code[i] = 's';
+        break;
+      case violet:
+        code[i] = 'v';
+        break;
+      case white:
+        code[i] = 'w';
+        break;
+      default:
+        bail_out(EXIT_FAILURE, "Unkown Color - not possible!!");
+    }
+  }
+}
+
 
 static void print_binary(int guess, int n) 
 {
