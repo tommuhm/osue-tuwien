@@ -23,15 +23,17 @@ const int SIZE = 1024;
 // command name - used for usage output
 const char *COMMAND = "mydiff";
 
+static FILE *file1, *file2;
+
 /**
   * closes open file descriptors and exits the program
   */
-static void bail_out(FILE *file1, FILE *file, int exit_code, char *argv[]);
+static void bail_out(int exit_code);
 
 /**
-  * print formated error code for filname
+  * closes resources
   */
-static void print_error_code(char *filename, int errorno);
+static void close_resources(void);
 
 int main(int argc, char *argv[]) {
 
@@ -46,19 +48,15 @@ int main(int argc, char *argv[]) {
   }
 
   // try to open files for read and exit on error
-  FILE *file1, *file2;
   if ((file1 = fopen(argv[1], "r")) == NULL) {
     (void) fprintf(stderr, "%s: Datei %s existiert nicht!\n", COMMAND, argv[1]);
-    exit(EXIT_FAILURE);
+    bail_out(EXIT_FAILURE);
   }
   
   if ((file2 = fopen(argv[2], "r")) == NULL) {
     (void) fprintf(stderr, "%s: Datei %s existiert nicht!\n", COMMAND, argv[2]);
-    if (fclose(file1) != 0) {
-      (void) fprintf(stderr, "%s: %s - %s\n", COMMAND, argv[2], strerror(errno));
-    } 
-    exit(EXIT_FAILURE);
-    }
+    bail_out(EXIT_FAILURE);
+  }
 
   int line_count = 0;
   while (fgets(b1, SIZE, file1) != NULL && fgets(b2, SIZE, file2) != NULL) {
@@ -77,37 +75,25 @@ int main(int argc, char *argv[]) {
   }
   
   // check if fgets got an error
-  if (ferror(file1) != 0) {
-    print_error_code(argv[1], errno);
-    bail_out(file1, file2, EXIT_FAILURE, argv);
-  }
-  if (ferror(file2) != 0) {
-    print_error_code(argv[2], errno);
-    bail_out(file1, file2, EXIT_FAILURE, argv);
+  if (ferror(file1) != 0 || ferror(file2) != 0) {
+    bail_out(EXIT_FAILURE);
   }
 
-  bail_out(file1, file2, EXIT_SUCCESS, argv);
+  bail_out(EXIT_SUCCESS);
 }
 
-static void bail_out(FILE *file1, FILE *file2, int exit_code, char *argv[]) {
-  errno = 0;
-  if (file1 != NULL && fclose(file1) != 0) {
-    print_error_code(argv[1], errno);
+static void bail_out(int exit_code) {
+  close_resources();
+  exit(exit_code);
+}
+
+static void close_resources(void) {
+  if (file1 != NULL) {
+    fclose(file1);
     file1 = NULL;
-  }
-  if (file2 != NULL && fclose(file2) != 0) {
-    print_error_code(argv[2], errno);
+  } 
+  if (file2 != NULL) {
+    fclose(file2);
     file2 = NULL;
   }
-  
-  if (exit_code != 0 || errno != 0) {
-    exit(EXIT_FAILURE);
-  } else {
-    exit(EXIT_SUCCESS);
-  }
 }
-
-static void print_error_code(char *filename, int errorno) {
-  (void) fprintf(stderr, "%s: %s - %s\n", COMMAND, filename, strerror(errno));
-}
-
