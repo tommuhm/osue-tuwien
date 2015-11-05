@@ -1,7 +1,7 @@
 /** 
- *  mastermind-server
+ *  mastermind: server
  *
- *  @author Thomas Muhm
+ *  @author Thomas Muhm 1326486
  *
  *  @brief start a mastermind server a specified solutin which listens to client guesses
  *
@@ -102,6 +102,7 @@ struct opts {
 /* === Prototypes === */
 
 /**
+ * parse_args
  * @brief Parse command line options
  * @param argc The argument counter
  * @param argv The argument vector
@@ -110,6 +111,7 @@ struct opts {
 static void parse_args(int argc, char **argv, struct opts *options);
 
 /**
+ * write_to_client
  * @brief Write message to socket
  *
  * This code *illustrates* one way to deal with partial writes
@@ -122,6 +124,7 @@ static void parse_args(int argc, char **argv, struct opts *options);
 static int write_to_client(int sockfd_con, uint8_t *buffer, size_t n);
 
 /**
+ * read_from_client
  * @brief Read message from socket
  *
  * This code *illustrates* one way to deal with partial reads
@@ -134,6 +137,7 @@ static int write_to_client(int sockfd_con, uint8_t *buffer, size_t n);
 static uint8_t *read_from_client(int sockfd_con, uint8_t *buffer, size_t n);
 
 /**
+ * compute_answer
  * @brief Compute answer to request
  * @param req Client's guess
  * @param resp Buffer that will be sent to the client
@@ -143,6 +147,7 @@ static uint8_t *read_from_client(int sockfd_con, uint8_t *buffer, size_t n);
 static int compute_answer(uint16_t req, uint8_t *resp, uint8_t *secret);
 
 /**
+ * bail_out
  * @brief terminate program on program error
  * @param exitcode exit code
  * @param fmt format string
@@ -150,12 +155,14 @@ static int compute_answer(uint16_t req, uint8_t *resp, uint8_t *secret);
 static void bail_out(int exitcode, const char *fmt, ...);
 
 /**
+ * signal_handler
  * @brief Signal handler
  * @param sig Signal number catched
  */
 static void signal_handler(int sig);
 
 /**
+ * free_resources
  * @brief free allocated resources
  */
 static void free_resources(void);
@@ -289,6 +296,7 @@ static void signal_handler(int sig)
 }
 
 /**
+ * main
  * @brief Program entry point
  * @param argc The argument counter
  * @param argv The argument vector

@@ -1,7 +1,7 @@
 /** 
  *  mydiff
  *
- *  @author Thomas Muhm
+ *  @author Thomas Muhm 1326486
  *
  *  @brief compares 2 files and prints the number of differences for each line
  *
@@ -26,15 +26,25 @@ const char *COMMAND = "mydiff";
 static FILE *file1, *file2;
 
 /**
-  * closes open file descriptors and exits the program
+  * bail_out
+  * @brief closes open resources and exits the program
+  * @param exit_code programm exits with this code
   */
 static void bail_out(int exit_code);
 
-/**
-  * closes resources
+/** 
+  * close_resources
+  * @brief closes all open resources
   */
 static void close_resources(void);
 
+/**
+ * main
+ * @brief Program entry point
+ * @param argc The argument counter
+ * @param argv The argument vector
+ * @return EXIT_SUCCESS on success, EXIT_FAILURE on error
+ */
 int main(int argc, char *argv[]) {
 
   // line buffer for each file

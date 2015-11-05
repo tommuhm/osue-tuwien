@@ -1,7 +1,7 @@
 #
 # makefile for mydiff
 #
-# author: Thomas Muhm
+# @author Thomas Muhm 1326486
 #
 
 CC=gcc

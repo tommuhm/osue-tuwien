@@ -1,7 +1,7 @@
 /** 
- *  mastermind-client
+ *  mastermind: client
  *
- *  @author Thomas Muhm
+ *  @author Thomas Muhm 1326486
  *
  *  @brief starts a mastermind client which connects to the specified server and tries to solve the secret
  *
@@ -69,7 +69,7 @@ static struct addrinfo *ai;
 /* This variable is set upon receipt of a signal */
 volatile sig_atomic_t quit = 0;
 
-enum { beige, darkblue, green, orange, red, black, violet, white };
+enum { beige = 0, darkblue, green, orange, red, black, violet, white };
 
 /* === Type Definitions === */
 struct opts {
@@ -88,6 +88,7 @@ struct opts {
 static void parse_args(int argc, char **argv, struct opts *options);
 
 /**
+ * read_from_server
  * @brief Read message from socket
  *
  * This code *illustrates* one way to deal with partial reads
@@ -100,6 +101,7 @@ static void parse_args(int argc, char **argv, struct opts *options);
 static uint8_t *read_from_server(int sockfd, uint8_t *buffer, size_t n);
 
 /**
+ * write_to_server
  * @brief Write message to socket
  *
  * This code *illustrates* one way to deal with partial writes
@@ -112,6 +114,7 @@ static uint8_t *read_from_server(int sockfd, uint8_t *buffer, size_t n);
 static int write_to_server(int sockfd, uint8_t *buffer, size_t n);
 
 /**
+ * knuth_remove_sol
  * @brief knuth alogrithm - remove impossible solutions
  * @param guess       The last guess
  * @param solutions   Solution array - each index represents a solution
@@ -121,6 +124,7 @@ static int write_to_server(int sockfd, uint8_t *buffer, size_t n);
 static void knuth_remove_sol(uint16_t guess, int *solutions, int n, int red_guess, int white_guess);
 
 /**
+ * bail_out
  * @brief terminate program on program error
  * @param exitcode exit code
  * @param fmt format string
@@ -128,17 +132,20 @@ static void knuth_remove_sol(uint16_t guess, int *solutions, int n, int red_gues
 static void bail_out(int exitcode, const char *fmt, ...);
 
 /**
+ * signal_handler
  * @brief Signal handler
  * @param sig Signal number catched
  */
 static void signal_handler(int sig);
 
 /**
+ * free_resources
  * @brief free allocated resources
  */
 static void free_resources(void);
 
 /**
+ * main
  * @brief Program entry point
  * @param argc The argument counter
  * @param argv The argument vector
@@ -238,7 +245,6 @@ int main(int argc, char *argv[]) {
     } 
     
     /* receive response from server */
-    DEBUG()
     if (read_from_server(sockfd, buffer, READ_BYTES) == NULL) {
       if (quit) break; /* caught signal */
       bail_out(EXIT_FAILURE, "read_from_server");
