@@ -1,3 +1,9 @@
+#
+# makefile for mydiff
+#
+# author: Thomas Muhm
+#
+
 CC=gcc
 DEFS=-D_XOPEN_SOURCE=500 -D_BSD_SOURCE
 CFLAGS=-Wall -g -std=c99 -pedantic $(DEFS)
