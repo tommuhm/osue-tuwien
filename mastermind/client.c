@@ -252,16 +252,16 @@ int main(int argc, char *argv[]) {
 
     DEBUG("Status - red: %i, white: %i, parity check: %i, end: %i\n", red, white, parity_check, status);
     if (red == SLOTS) {
-      (void) fprintf(stdout, "Game won in %i rounds.\n", rounds);
+      (void) fprintf(stdout, "Runden %d\n", rounds);
       break;
     }
     if (game_lost_check == 1) {
-      (void) fprintf(stdout, "Game lost - no more rounds :(\n");
+      (void) fprintf(stdout, "Game lost\n");
       ret = EXIT_GAME_LOST;
       break;
     }
     if (parity_check == 1) {
-      (void) fprintf(stdout, "Parity Error!\n");
+      (void) fprintf(stdout, "Parity error\n");
       if (ret == EXIT_GAME_LOST) {
         ret = EXIT_MULTIPLE_ERRORS;
       } else {
