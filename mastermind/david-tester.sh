@@ -15,4 +15,4 @@ do
     	then
     	echo "$i $line" >> outputofcli.txt
     fi
-done < testcasefile
+done < perm.txt

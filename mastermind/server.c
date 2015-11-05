@@ -65,9 +65,6 @@
 
 #define BACKLOG (5)
 
-// #define ENDEBUG
-
-
 /* === Macros === */
 
 #ifdef ENDEBUG
@@ -168,20 +165,20 @@ static void free_resources(void);
 
 static int write_to_client(int fd, uint8_t *buffer, size_t n) 
 {
-  size_t bytes_sent = 0;
-  do {
-    ssize_t s;
-    s = send(fd, buffer + bytes_sent, n - bytes_sent, 0);
-    if (s <= 0) {
-      return -1;
-    }
-    bytes_sent += s;
-  } while (bytes_sent < n);
+    size_t bytes_sent = 0;
+    do {
+        ssize_t s;
+        s = send(fd, buffer + bytes_sent, n - bytes_sent, 0);
+        if (s <= 0) {
+            return -1;
+        }
+        bytes_sent += s;
+    } while (bytes_sent < n);
   
-  if (bytes_sent < n) {
-    return -1;
-  }
-  return 0;
+    if (bytes_sent < n) {
+        return -1;
+    }
+    return 0;
 }
 
 static uint8_t *read_from_client(int fd, uint8_t *buffer, size_t n)
@@ -333,8 +330,7 @@ int main(int argc, char *argv[])
     
     /* create socket and set options */
     if ((sockfd = socket(AF_INET, SOCK_STREAM, 0)) < 0) {
-      (void) fprintf(stderr, "Socket creation failed\n");
-      return EXIT_FAILURE;
+        bail_out(EXIT_FAILURE, "Socket creation failed");
     }
     
     int optval = 1;
@@ -342,29 +338,25 @@ int main(int argc, char *argv[])
     
     /* bind socket to port and address */
     struct sockaddr_in server_addr;
+    memset(&server_addr, 0, sizeof server_addr);  
+
     server_addr.sin_family=AF_INET;
     server_addr.sin_addr.s_addr=INADDR_ANY;
     server_addr.sin_port=htons(options.portno);
     
     if (bind(sockfd, (struct sockaddr *) &server_addr, sizeof(server_addr)) < 0) {
-      (void) fprintf(stderr, "Could not bind to port\n");
-      free_resources();
-      return EXIT_FAILURE;
+        bail_out(EXIT_FAILURE, "Could not bind to port");
     }
 
     /* start listening for clients */    
     if (listen(sockfd, 5) < 0) {
-      (void) fprintf(stderr, "Could not set socket to passive\n");
-      free_resources();
-      return EXIT_FAILURE;
+        bail_out(EXIT_FAILURE, "Could not set socket to passive");
     }
     
     /* accept a incoming client connection */
     connfd = accept(sockfd, (struct sockaddr*) &server_addr, (socklen_t *) &server_addr);
     if (connfd < 0) {
-      (void) fprintf(stderr, "Accept socket failed\n");
-      free_resources();
-      return EXIT_FAILURE;
+        bail_out(EXIT_FAILURE, "Accept socket failed");
     }
 
     /* accepted the connection */
