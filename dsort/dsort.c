@@ -14,9 +14,11 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/types.h>
+#include <sys/wait.h>
 #include <unistd.h>
 #include <errno.h>
 #include <stdarg.h>
+#include <strings.h>
 
 
 /* === Constants === */
@@ -93,19 +95,82 @@ static void bail_out(int exitcode, const char *fmt, ...) {
 
 static void run_command(char *command) {
 	DEBUG("run command %s\n", command);
-	pid_t pid;
-	switch (pid = fork()) {
+
+	// create arg list for command
+	char *cmd[] = { "bash", "-c", command, (char *) 0};
+	
+	// create pipe 
+	int command_pipe[2];
+	if (pipe(command_pipe) != 0) {
+		bail_out(errno, "can't create pipe");	
+	}
+
+	// run child - own functions for child and parent behavior?
+	pid_t pid, child_pid;
+	int status;
+	switch (child_pid = fork()) {
 		case -1: 
 			bail_out(errno, "can't fork");
 			break;
 		case 0:
-			(void) printf("child here - exec command\n");
-			exit(EXIT_SUCCESS);			
+			(void) printf("child: child here - exec command\n");
+			(void) printf("child: closing read pipe\n");
+			if (close(command_pipe[0]) != 0) {
+				bail_out(errno, "child: can't close write pipe");			
+			}
+			(void) printf("child: rewire write pipe to stdout\n");
+			(void) fflush(stdout); // TODO error?
+			if (dup2(command_pipe[1], fileno(stdout)) == -1) {
+				bail_out(errno, "child: can't rewire wire pipe");			
+			}
+			if (close(command_pipe[1]) != 0) {
+				bail_out(errno, "child: can't close fd after rewire");
+			}							
+			(void) execv("/bin/bash", cmd);
+			bail_out(errno, "child: can't exec");
 			break;
 		default:
-			(void) printf("parent here - wait for child to die?\n"); 
+			(void) printf("parent: closing write pipe\n");
+			if (close(command_pipe[1]) != 0) {
+				bail_out(errno, "parent: can't close write pipe");			
+			}
+			(void) printf("parent: read from pipe\n");
+			char buffer[LINE_SIZE];
+			bzero(&buffer, sizeof buffer);
+			
+			FILE *read_pipe;
+			if ((read_pipe = fdopen(command_pipe[0], "r")) == NULL) {
+				bail_out(errno, "parent: could not open read pipe");			
+			}
+
+			char *output_array[LINE_SIZE];
+			printf("array size %li\n", sizeof(output_array));
+printf("array size %li\n", sizeof(*output_array));			
+int array_size = 0;
+			while(fgets(buffer, sizeof buffer, read_pipe) != NULL) {
+				if (output_array == NULL) {
+			//		(void) printf("init array with malloc size: %li %li \n", (sizeof *output_array), sizeof output_array);
+			//		output_array = malloc(sizeof *output_array);
+			//		free(output_array);
+				}
+
+
+				(void) printf("parent: pipe read: %s\n", buffer);	
+			}
+
+			(void) printf("parent: parent here - wait for child to die?\n"); 
+			while ((pid = wait(&status)) != child_pid ) {
+				if (pid != -1) continue; /* other child */
+				if (errno == EINTR) continue; /* interrupted */
+				bail_out(errno, "parent: can‘t wait");
+			}
+			if (WEXITSTATUS(status) == EXIT_SUCCESS) {
+				(void) printf("parent: child exit successfully\n"); 
+			} else {
+				(void) printf("parent: child had an error: %s\n", strerror(WEXITSTATUS(status)));	
+			}
 			break;
-	}
+		}
 }
 
 int main(int argc, char **argv) {
@@ -123,11 +188,11 @@ int main(int argc, char **argv) {
 
 	run_command(argv[2]);
 
-	// 2 commands von argv laden
+	// 2 commands von argv laden - done
 
-	// 2 forks fuer kindprozze
+	// 2 forks fuer kindprozze - done
 
-	// bourne shell in kindprozze aufrufen mit "-c" "command"	
+	// bourne shell in kindprozze aufrufen mit "-c" "command" - done	
 
 	// mit pipes die ausgabe in ein array speichern
 	// ausgabe zeilenweise lesen (fgets?) size 1023echte zeichen=> SIZE=1024 fuer \0 or \n!!
