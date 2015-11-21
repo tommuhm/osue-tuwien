@@ -8,7 +8,7 @@
 ##
 
 CC=gcc
-CFLAGS=-Wall -std=c99 -pedantic -D_XOPEN_SOURCE=500 -D_OPEN_BSD -g
+CFLAGS=-Wall -std=c99 -pedantic -D_XOPEN_SOURCE=500 -D_BSD_SOURCE -g
 
 .PHONY: all clean
 
