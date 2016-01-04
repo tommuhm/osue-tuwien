@@ -8,19 +8,19 @@
 ##
 
 CC=gcc
-CFLAGS=-Wall -std=c99 -pedantic -D_XOPEN_SOURCE=500 -D_BSD_SOURCE -g
+CFLAGS=-Wall -std=c99 -pedantic -D_XOPEN_SOURCE=500 -D_BSD_SOURCE -g -lrt -lpthread
 
 .PHONY: all clean
 
-all: battleships
+all: battleships-server battleships-client
 
-battleships: battleships.o
+##battleships-server: battleships-server.o
 
 $.o: $.c
 	$(CC) $(CFLAGS) $^
 
 clean:
-	rm -f battleships battleships.o
+	rm -f battleships-server battleships-client battleships-server.o battleships-client.o
 
 debug: CFLAGS += -DENDEBUG
 debug: all

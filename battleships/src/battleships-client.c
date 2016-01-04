@@ -1,24 +1,28 @@
 /**
- * @file battleship-client.c
+ * @file battleships-client.c
  *
  * @author Thomas Muhm 1326486
  * 
- * @brief battleship client
+ * @brief battleships client
  *
- * @details battleship client 
+ * @details battleships client 
  *
  * @date 04.01.2016
  * 
  */
 #include <stdio.h>
 #include <stdlib.h>
-#include <string.h>
-#include <sys/types.h>
-#include <sys/wait.h>
-#include <unistd.h>
-#include <errno.h>
 #include <stdarg.h>
-#include <strings.h>
+#include <string.h>
+#include <errno.h>
+
+#include <semaphore.h>
+#include <fcntl.h>
+
+#include <sys/mman.h>
+#include <unistd.h>
+
+#include "battleships.h"
 
 /* === Constants === */
 
@@ -43,17 +47,15 @@ static const char *progname = "battleship-server"; /* default name */
 
 /* === Prototypes === */
 
-/** free_resources
- * @brief free allocated resources
+/**
+ *
  */
-static void free_resources(void);
+static void open_semaphores(void);
 
-/** program exit point for errors
- * @brief free resources and terminate program on program error
- * @param exitcode exit code
- * @param fmt format string
+/**
+ *
  */
-static void bail_out(int exitcode, const char *fmt, ...);
+static void open_shared_memory(void);
 
 /* === Implementations === */
 
@@ -78,6 +80,46 @@ static void bail_out(int exitcode, const char *fmt, ...) {
 	exit(exitcode);
 }
 
+static void open_semaphores(void) {
+	s1 = sem_open(SEM_1, 0);
+	if (s1 == SEM_FAILED) {
+		bail_out(errno, "could not open semaphore s1");
+	}
+	s2 = sem_open(SEM_2, 0);
+	if (s2 == SEM_FAILED) {
+		bail_out(errno, "could not open semaphore s2");
+	}	
+}
+
+static void open_shared_memory(void) {
+	/* create and/or open shared memory object */
+	int shmfd = shm_open(SHM_NAME, O_RDWR, PERMISSION);
+	if (shmfd == -1) {
+ 		/* error */
+		bail_out(errno, "shm_open failed");
+	}
+
+	if (ftruncate(shmfd, sizeof *shared) == -1) {
+		/* error */
+		bail_out(errno, "ftruncate failed");
+	}
+	
+	/* map shared memory object */
+	shared = mmap(NULL, sizeof *shared, PROT_READ | PROT_WRITE, MAP_SHARED, shmfd, 0);
+	if (shared == MAP_FAILED) { 
+		bail_out(errno, "mmap failed");
+		/* error */
+	}
+
+	if (close(shmfd) == -1) {
+		/* error */
+		bail_out(errno, "could not close shared memory file descriptor");
+	}
+
+	shmfd = -1; // TODO do i need this, copied from uli
+}
+
+
 /**
  * @brief Program entry point
  * @param argc The argument counter
@@ -85,12 +127,43 @@ static void bail_out(int exitcode, const char *fmt, ...) {
  * @return EXIT_SUCCESS on success and an error code if a problem occured
  */
 int main(int argc, char **argv) {
+	// TODO get opts trotzdem verwenden?!
 	if(argc > 0) {
 		progname = argv[0];
 	}
-	if (argc != 3) {
-		bail_out(EXIT_FAILURE, "Usage: %s \"command1\" \"command2\"", progname);		
+	if (argc != 1) {
+		bail_out(EXIT_FAILURE, "Usage: %s ", progname);		
 	}
+
+	open_semaphores();
+	open_shared_memory();
+
+	for(int i = 0; i < 3; ++i) {
+		semWait(s2);
+		/* critical section entry ... */
+		shared->data[0]++;
+		fprintf(stdout, "critical: data = %d\n", shared->data[0]);
+		/* critical section exit ... */
+		semPost(s1);
+	}
+
+	// TODO move to free resources
+	sem_close(s1); 
+	sem_close(s2);
+	sem_unlink(SEM_1); 
+	sem_unlink(SEM_2);
+	/* unmap shared memory */
+	if (munmap(shared, sizeof *shared) == -1) {
+		/* error */
+		bail_out(errno, "munmap failed");
+	}
+
+	/* remove shared memory object */
+	if (shm_unlink(SHM_NAME) == -1) {
+		/* error */
+		bail_out(errno, "shm unlink failed");
+	}
+	// TODO END
 
 	free_resources();
 
