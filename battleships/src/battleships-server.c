@@ -81,17 +81,17 @@ static void bail_out(int exitcode, const char *fmt, ...) {
 }
 
 static void create_semaphores(void) {
-	s1 = sem_open(SEM_, O_CREAT | O_EXCL, PERMISSION, 0);
+	s1 = sem_open(SEM_1, O_CREAT | O_EXCL, PERMISSION, 0);
 	if (sem_players == SEM_FAILED) {
-		bail_out(errno, "could not create semaphore sem_players");
+		bail_out(errno, "could not create semaphore s1");
 	}
-	s2 = sem_open(SEM_PLAYER2, O_CREAT | O_EXCL, PERMISSION, 0);
+	s2 = sem_open(SEM_2, O_CREAT | O_EXCL, PERMISSION, 0);
 	if (s2 == SEM_FAILED) {
 		bail_out(errno, "could not create semaphore s2");
 	}	
-	s3 = sem_open(SEM_PLAYER2, O_CREAT | O_EXCL, PERMISSION, 0);
+	s3 = sem_open(SEM_3, O_CREAT | O_EXCL, PERMISSION, 2);
 	if (s2 == SEM_FAILED) {
-		bail_out(errno, "could not create semaphore s2");
+		bail_out(errno, "could not create semaphore s3");
 	}
 }
 
