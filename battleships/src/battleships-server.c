@@ -81,14 +81,18 @@ static void bail_out(int exitcode, const char *fmt, ...) {
 }
 
 static void create_semaphores(void) {
-	s1 = sem_open(SEM_PLAYERS, O_CREAT | O_EXCL, PERMISSION, 2);
-	if (s1 == SEM_FAILED) {
-		bail_out(errno, "could not create semaphore s1");
+	s1 = sem_open(SEM_, O_CREAT | O_EXCL, PERMISSION, 0);
+	if (sem_players == SEM_FAILED) {
+		bail_out(errno, "could not create semaphore sem_players");
 	}
-	s2 = sem_open(SEM_2, O_CREAT | O_EXCL, PERMISSION, 0);
+	s2 = sem_open(SEM_PLAYER2, O_CREAT | O_EXCL, PERMISSION, 0);
 	if (s2 == SEM_FAILED) {
 		bail_out(errno, "could not create semaphore s2");
 	}	
+	s3 = sem_open(SEM_PLAYER2, O_CREAT | O_EXCL, PERMISSION, 0);
+	if (s2 == SEM_FAILED) {
+		bail_out(errno, "could not create semaphore s2");
+	}
 }
 
 static void create_shared_memory(void) {
@@ -140,24 +144,57 @@ int main(int argc, char **argv) {
 
 
 	// waiting for two players
-	semWait(sem_players);
+	wait_sem(s1);
+	wait_sem(s2);
 	fprintf(stdout, "two players available");
 
 
-	for(int i = 0; i < 3; ++i) {
-		semWait(s1);
+	while(1)
+	wait_sem(s2);
+
+	post_sem(s1);
+
+
+
+	// client 1
+	s1 = init 1
+	s2 = init 0
+	new_game init 2
+
+	wait_sem(new_game)
+
+
+	while(1)
+	wait_sem(s1);
+		
+	// do stuff
+
+	post_sem(s2);
+
+	// client 2
+	wait_sem(s1);
+	// do stuff
+	post_sem(s2);
+
+
+
+
+//	for(int i = 0; i < 3; ++i) {
+//		semWait(s1);
 		/* critical section entry ... */
-		shared->data[0] = 23;
-		fprintf(stdout, "critical: data = %d\n", shared->data[0]);
+//		shared->data[0] = 23;
+//		fprintf(stdout, "critical: data = %d\n", shared->data[0]);
 		/* critical section exit ... */
-		semPost(s2);
-	}
+//		semPost(s2);
+//	}
 
 
 
 	// TODO close stuff to free method
-	sem_close(s1); 
+	sem_close(sem_players); 
 	sem_close(s2);
+	sem_unlink(SEM_PLAYERS); 
+	sem_unlink(SEM_2);
 
 	/* unmap shared memory */
 	if (munmap(shared, sizeof *shared) == -1) {

@@ -17,7 +17,7 @@
 #define MAX_DATA (50)
 #define PERMISSION (0600)
 
-#define SEM_PAYERS "/battleships_sem_players"
+#define SEM_PLAYERS "/battleships_sem_players"
 #define SEM_2 "/sem_2"
 
 /* === Prototypes === */
@@ -38,13 +38,13 @@ struct myshm *shared;
 sem_t *sem_players;
 sem_t *s2;
 
-void semWait(sem_t *sem) {
+void wait_sem(sem_t *sem) {
 	if (sem_wait(sem) == -1) {
 		bail_out(errno, "sem_wait failed");
 	}
 }
 
-void semPost(sem_t *sem) {
+void post_sem(sem_t *sem) {
 	if (sem_post(sem) == -1) {
 		bail_out(errno, "sem_post failed");
 	}

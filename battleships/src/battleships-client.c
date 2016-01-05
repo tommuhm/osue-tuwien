@@ -81,8 +81,8 @@ static void bail_out(int exitcode, const char *fmt, ...) {
 }
 
 static void open_semaphores(void) {
-	s1 = sem_open(SEM_1, 0);
-	if (s1 == SEM_FAILED) {
+	sem_players = sem_open(SEM_PLAYERS, 0);
+	if (sem_players == SEM_FAILED) {
 		bail_out(errno, "could not open semaphore s1");
 	}
 	s2 = sem_open(SEM_2, 0);
@@ -138,19 +138,24 @@ int main(int argc, char **argv) {
 	open_semaphores();
 	open_shared_memory();
 
-	for(int i = 0; i < 3; ++i) {
-		semWait(s2);
+	post_sem(sem_players);
+
+	fprintf(stdout, "player ready");
+
+
+//	for(int i = 0; i < 3; ++i) {
+//		semWait(s2);
 		/* critical section entry ... */
-		shared->data[0]++;
-		fprintf(stdout, "critical: data = %d\n", shared->data[0]);
+//		shared->data[0]++;
+//		fprintf(stdout, "critical: data = %d\n", shared->data[0]);
 		/* critical section exit ... */
-		semPost(s1);
-	}
+//		semPost(s1);
+//	}
 
 	// TODO move to free resources
-	sem_close(s1); 
+	sem_close(sem_players); 
 	sem_close(s2);
-	sem_unlink(SEM_1); 
+	sem_unlink(SEM_PLAYERS); 
 	sem_unlink(SEM_2);
 	/* unmap shared memory */
 	if (munmap(shared, sizeof *shared) == -1) {
