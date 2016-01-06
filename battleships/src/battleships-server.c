@@ -81,17 +81,21 @@ static void bail_out(int exitcode, const char *fmt, ...) {
 }
 
 static void create_semaphores(void) {
-	s1 = sem_open(SEM_1, O_CREAT | O_EXCL, PERMISSION, 0);
-	if (sem_players == SEM_FAILED) {
+	player_ready = sem_open(SEM_1, O_CREAT | O_EXCL, PERMISSION, 0);
+	if (player_ready == SEM_FAILED) {
 		bail_out(errno, "could not create semaphore s1");
 	}
-	s2 = sem_open(SEM_2, O_CREAT | O_EXCL, PERMISSION, 0);
-	if (s2 == SEM_FAILED) {
+	round_client = sem_open(SEM_2, O_CREAT | O_EXCL, PERMISSION, 0);
+	if (round_client == SEM_FAILED) {
 		bail_out(errno, "could not create semaphore s2");
 	}	
-	s3 = sem_open(SEM_3, O_CREAT | O_EXCL, PERMISSION, 2);
-	if (s2 == SEM_FAILED) {
+	round_server = sem_open(SEM_3, O_CREAT | O_EXCL, PERMISSION, 2);
+	if (round_server == SEM_FAILED) {
 		bail_out(errno, "could not create semaphore s3");
+	}
+	new_game = sem_open(SEM_4, O_CREAT | O_EXCL, PERMISSION, 2);
+	if (new_game == SEM_FAILED) {
+		bail_out(errno, "could not create semaphore s4");
 	}
 }
 
@@ -142,39 +146,37 @@ int main(int argc, char **argv) {
 	create_semaphores();
 	create_shared_memory();
 
-
 	// waiting for two players
-	wait_sem(s1);
-	wait_sem(s2);
-	fprintf(stdout, "two players available");
 
 
-	while(1)
-	wait_sem(s2);
-
-	post_sem(s1);
-
-
+//	while(true) {	
+		fprintf("setting up game field");
+		wait_sem(player_ready);
+		fprintf(stdout, "player 1 ready");
+		wait_sem(player_ready);
+		fprintf(stdout, "player 2 ready");
+	
+		post_sem(round_client);
+		fprintf(stdout, "game startet");
+	
+		for (int i = 0; i < 5; i++) {
+			wait_sem(server_round);
+		
+			fprintf(stdout, "server doing stuff for player 1");
+		
+			post_sem(server_response);
+		
+		
+			wait_sem(server_round);
+		
+			fprintf(stdout, "server doing stuff for player 2");
+		
+			post_sem(server_response);
+		}
+		fprintf(stdout, "server finished");
+//	}
 
 	// client 1
-	s1 = init 1
-	s2 = init 0
-	new_game init 2
-
-	wait_sem(new_game)
-
-
-	while(1)
-	wait_sem(s1);
-		
-	// do stuff
-
-	post_sem(s2);
-
-	// client 2
-	wait_sem(s1);
-	// do stuff
-	post_sem(s2);
 
 
 
@@ -191,10 +193,14 @@ int main(int argc, char **argv) {
 
 
 	// TODO close stuff to free method
-	sem_close(sem_players); 
-	sem_close(s2);
-	sem_unlink(SEM_PLAYERS); 
+	sem_close(new_game);
+	sem_close(player_ready); 
+	sem_close(round_client);
+	sem_close(round_server);
+	sem_unlink(SEM_1); 
 	sem_unlink(SEM_2);
+	sem_unlink(SEM_3);
+	sem_unlink(SEM_4);
 
 	/* unmap shared memory */
 	if (munmap(shared, sizeof *shared) == -1) {

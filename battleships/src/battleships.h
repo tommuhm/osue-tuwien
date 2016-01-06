@@ -17,8 +17,10 @@
 #define MAX_DATA (50)
 #define PERMISSION (0600)
 
-#define SEM_PLAYERS "/battleships_sem_players"
+#define SEM_1 "/sem_1"
 #define SEM_2 "/sem_2"
+#define SEM_3 "/sem_3"
+#define SEM_4 "/sem_4"
 
 /* === Prototypes === */
 
@@ -35,8 +37,10 @@ static void free_resources(void);
 static void bail_out(int exitcode, const char *fmt, ...);
 
 struct myshm *shared;
-sem_t *sem_players;
-sem_t *s2;
+sem_t *player_ready;
+sem_t *round_client;
+sem_t *round_server;
+sem_t *new_game;
 
 void wait_sem(sem_t *sem) {
 	if (sem_wait(sem) == -1) {

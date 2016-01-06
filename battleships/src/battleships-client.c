@@ -81,13 +81,21 @@ static void bail_out(int exitcode, const char *fmt, ...) {
 }
 
 static void open_semaphores(void) {
-	sem_players = sem_open(SEM_PLAYERS, 0);
-	if (sem_players == SEM_FAILED) {
+	player_ready = sem_open(SEM_1, 0);
+	if (player_ready == SEM_FAILED) {
 		bail_out(errno, "could not open semaphore s1");
 	}
-	s2 = sem_open(SEM_2, 0);
-	if (s2 == SEM_FAILED) {
+	round_client = sem_open(SEM_2, 0);
+	if (round_client == SEM_FAILED) {
 		bail_out(errno, "could not open semaphore s2");
+	}	
+	round_server = sem_open(SEM_3, 0);
+	if (round_server == SEM_FAILED) {
+		bail_out(errno, "could not open semaphore s3");
+	}	
+	new_game = sem_open(SEM_4, 0);
+	if (new_game == SEM_FAILED) {
+		bail_out(errno, "could not open semaphore s4");
 	}	
 }
 
@@ -138,10 +146,30 @@ int main(int argc, char **argv) {
 	open_semaphores();
 	open_shared_memory();
 
-	post_sem(sem_players);
+	// start
+	wait_sem(new_game);
+	fprintf(stdout, "new game startet\n");
+	
+	post_sem(player_ready);
+	
+	
+	for (int i = 0; i < 5; ++i) {
+		wait_sem(client_round);
+	
+		fprintf(stdout, "playing game %d\n", i);
+	
+		post_sem(server_round);
+		wait_sem(server_response);
+		
+		fprintf(stdout, "got server response\n");
+		
+		post_sem(client_round);
+	}
+	
+	// end
 
-	fprintf(stdout, "player ready");
-
+	fprintf(stdout, "client finished");
+	post_sem(new_game);
 
 //	for(int i = 0; i < 3; ++i) {
 //		semWait(s2);
@@ -153,10 +181,12 @@ int main(int argc, char **argv) {
 //	}
 
 	// TODO move to free resources
-	sem_close(sem_players); 
-	sem_close(s2);
-	sem_unlink(SEM_PLAYERS); 
-	sem_unlink(SEM_2);
+	sem_close(player_ready); 
+	sem_close(new_game);
+	sem_close(round_client);
+	sem_close(round_server);
+//	sem_unlink(SEM_PLAYERS); 
+//	sem_unlink(SEM_2);
 	/* unmap shared memory */
 	if (munmap(shared, sizeof *shared) == -1) {
 		/* error */
