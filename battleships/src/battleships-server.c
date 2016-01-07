@@ -164,18 +164,25 @@ int main(int argc, char **argv) {
 //	while(true) {	
 		fprintf(stdout, "setting up game field\n");
 
+		struct ship player1ship;
+		struct ship player2ship;
 
 		wait_sem(player_ready);
 		shared->player = PLAYER1;
 		post_sem(client_round);
 		wait_sem(server_round);
 		fprintf(stdout, "player 1 ready\n");
+		
+		player1ship = shared->playership;
 
 		wait_sem(player_ready);
 		shared->player = PLAYER2;
 		post_sem(client_round);
 		wait_sem(server_round);
 		fprintf(stdout, "player 2 ready\n");
+
+		player2ship = shared->playership;
+
 
 		shared->state	= STATE_INIT;
 
@@ -197,6 +204,8 @@ int main(int argc, char **argv) {
 		for (int i = 0; i < 5; i++) {
 			wait_sem(server_round);
 			shared->round = i;
+			
+			
 
 			fprintf(stdout, "got first attack of player1\n");
 

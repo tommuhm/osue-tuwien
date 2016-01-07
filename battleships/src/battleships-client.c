@@ -168,27 +168,46 @@ int main(int argc, char **argv) {
 
 	int playerid = shared->player;
 	sem_t *player, *other_player;
+	
+	struct ship myship;
+	//  0  1  2  3
+	//  4  5  6  7
+	//  8  9 10 11
+	// 12 13 14 15
+	
 	if (playerid == PLAYER1) {
 		player = player1;
 		other_player = player2;
-		fprintf(stdout, "playing as player %d\n", PLAYER1);
+		fprintf(stdout, "playing as player %d\n", PLAYER1);		
+		myship.a = 0;
+		myship.b = 5;
+		myship.c = 10;
 	} else {
 		fprintf(stdout, "playing as player %d\n", PLAYER2);
 		player = player2;	
 		other_player = player1;
+		myship.a = 7;
+		myship.b = 10;
+		myship.c = 13;
 	}
-
+	shared->playership = &mysh
 	post_sem(server_round);	
 	
 	for (int i = 0; i < 5; ++i) {
 		wait_sem(player);
 	
-		fprintf(stdout, "playing game %d\n", i);
+		// save schuesse in array 
+	
+		fgets()
+	
+		fprintf(stdout, "get user input %d\n", i);
 	
 		post_sem(server_round);
 		wait_sem(player);
 		
-		fprintf(stdout, "got server response\n");
+		// schuesse von array mit 0,1,2 makieren => BOOM, MISS, Number
+		
+		fprintf(stdout, "mark on map\n");
 		
 		post_sem(other_player);
 	}

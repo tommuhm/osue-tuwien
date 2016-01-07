@@ -76,6 +76,14 @@ struct battleships {
 	unsigned int player;
 	unsigned int state;
 	unsigned int round;
+	unsigned int shoot;
+	struct ship *playership;
+};
+
+struct ship {
+	unsigned int a;
+	unsigned int b;
+	unsigned int c;
 };
 
 struct myhangman {
