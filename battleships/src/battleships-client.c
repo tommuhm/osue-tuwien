@@ -81,21 +81,33 @@ static void bail_out(int exitcode, const char *fmt, ...) {
 }
 
 static void open_semaphores(void) {
-	player_ready = sem_open(SEM_1, 0);
-	if (player_ready == SEM_FAILED) {
+	new_game = sem_open(SEM_1, 0);
+	if (new_game == SEM_FAILED) {
 		bail_out(errno, "could not open semaphore s1");
-	}
-	round_client = sem_open(SEM_2, 0);
-	if (round_client == SEM_FAILED) {
-		bail_out(errno, "could not open semaphore s2");
 	}	
-	round_server = sem_open(SEM_3, 0);
-	if (round_server == SEM_FAILED) {
+	player_ready = sem_open(SEM_2, 0);
+	if (player_ready == SEM_FAILED) {
+		bail_out(errno, "could not open semaphore s2");
+	}
+	client_round = sem_open(SEM_3, 0);
+	if (client_round == SEM_FAILED) {
 		bail_out(errno, "could not open semaphore s3");
 	}	
-	new_game = sem_open(SEM_4, 0);
-	if (new_game == SEM_FAILED) {
+	server_round = sem_open(SEM_4, 0);
+	if (server_round == SEM_FAILED) {
 		bail_out(errno, "could not open semaphore s4");
+	}	
+	server_response = sem_open(SEM_5, 0);
+	if (server_response == SEM_FAILED) {
+		bail_out(errno, "could not open semaphore s5");
+	}	
+	player1 = sem_open(SEM_6, 0);
+	if (player1 == SEM_FAILED) {
+		bail_out(errno, "could not open semaphore s6");
+	}	
+	player2 = sem_open(SEM_7, 0);
+	if (player2 == SEM_FAILED) {
+		bail_out(errno, "could not open semaphore s7");
 	}	
 }
 
@@ -151,19 +163,34 @@ int main(int argc, char **argv) {
 	fprintf(stdout, "new game startet\n");
 	
 	post_sem(player_ready);
-	
+
+	wait_sem(client_round);
+
+	int playerid = shared->player;
+	sem_t *player, *other_player;
+	if (playerid == PLAYER1) {
+		player = player1;
+		other_player = player2;
+		fprintf(stdout, "playing as player %d\n", PLAYER1);
+	} else {
+		fprintf(stdout, "playing as player %d\n", PLAYER2);
+		player = player2;	
+		other_player = player1;
+	}
+
+	post_sem(server_round);	
 	
 	for (int i = 0; i < 5; ++i) {
-		wait_sem(client_round);
+		wait_sem(player);
 	
 		fprintf(stdout, "playing game %d\n", i);
 	
 		post_sem(server_round);
-		wait_sem(server_response);
+		wait_sem(player);
 		
 		fprintf(stdout, "got server response\n");
 		
-		post_sem(client_round);
+		post_sem(other_player);
 	}
 	
 	// end
@@ -181,10 +208,11 @@ int main(int argc, char **argv) {
 //	}
 
 	// TODO move to free resources
-	sem_close(player_ready); 
 	sem_close(new_game);
-	sem_close(round_client);
-	sem_close(round_server);
+	sem_close(player_ready); 
+	sem_close(client_round);
+	sem_close(server_round);
+	sem_close(server_response);
 //	sem_unlink(SEM_PLAYERS); 
 //	sem_unlink(SEM_2);
 	/* unmap shared memory */
@@ -194,10 +222,10 @@ int main(int argc, char **argv) {
 	}
 
 	/* remove shared memory object */
-	if (shm_unlink(SHM_NAME) == -1) {
+	//if (shm_unlink(SHM_NAME) == -1) {
 		/* error */
-		bail_out(errno, "shm unlink failed");
-	}
+	//	bail_out(errno, "shm unlink failed");
+	//}
 	// TODO END
 
 	free_resources();

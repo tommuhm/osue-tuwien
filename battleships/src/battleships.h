@@ -17,10 +17,21 @@
 #define MAX_DATA (50)
 #define PERMISSION (0600)
 
+
+#define PLAYER1 (1)
+#define PLAYER2 (2)
+
+#define STATE_INIT (1)
+#define STATE_PLAYING (2)
+
+
 #define SEM_1 "/sem_1"
 #define SEM_2 "/sem_2"
 #define SEM_3 "/sem_3"
 #define SEM_4 "/sem_4"
+#define SEM_5 "/sem_5"
+#define SEM_6 "/sem_6"
+#define SEM_7 "/sem_7"
 
 /* === Prototypes === */
 
@@ -36,11 +47,17 @@ static void free_resources(void);
  */
 static void bail_out(int exitcode, const char *fmt, ...);
 
-struct myshm *shared;
-sem_t *player_ready;
-sem_t *round_client;
-sem_t *round_server;
+struct battleships *shared;
+
 sem_t *new_game;
+sem_t *player_ready;
+sem_t *client_round;
+sem_t *server_round;
+sem_t *server_response;
+
+sem_t *player1;
+sem_t *player2;
+
 
 void wait_sem(sem_t *sem) {
 	if (sem_wait(sem) == -1) {
@@ -55,9 +72,10 @@ void post_sem(sem_t *sem) {
 }
 
 
-struct myshm {
+struct battleships {
+	unsigned int player;
 	unsigned int state;
-	unsigned int data[MAX_DATA];
+	unsigned int round;
 };
 
 struct myhangman {
@@ -73,10 +91,6 @@ struct myhangman {
 	int wins;
 	int losses;
 	int end;
-};
-
-struct myshare {
-	struct myhangman hangmen[MAX_CLIENTS];
 };
 
 // TODO ALL REFACTOR!!
