@@ -10,40 +10,14 @@
  * @date 04.01.2016
  * 
  */
-#include <stdio.h>
-#include <stdlib.h>
-#include <stdarg.h>
-#include <string.h>
-#include <errno.h>
-
-#include <semaphore.h>
-#include <fcntl.h>
-
-#include <sys/mman.h>
-#include <unistd.h>
-
 #include "battleships.h"
-
-/* === Constants === */
-
-
-/* === Macros === */
-
-/**
- * @brief print debug messages if the debug flag is set 
- */
-#ifdef ENDEBUG
-#define DEBUG(...) do { fprintf(stderr, __VA_ARGS__); } while(0)
-#else
-#define DEBUG(...)
-#endif
 
 /* === Global Variables === */
 
+static int field[15] = {0};
+
 /** Name of the program */
 static const char *progname = "battleship-server"; /* default name */
-
-/* === Type Definitions === */
 
 /* === Prototypes === */
 
@@ -57,9 +31,24 @@ static void open_semaphores(void);
  */
 static void open_shared_memory(void);
 
+/**
+ *
+ */
+static void print_border(void);
+
+
+
 /* === Implementations === */
 
 static void free_resources(void) {
+	sem_close(server); // TODO error handling
+	sem_close(player1); // TODO error handling
+	sem_close(player2); // TODO error handling
+	sem_close(new_game); // TODO error handling
+	/* unmap shared memory */
+	if (munmap(shared, sizeof *shared) == -1) {
+		bail_out(errno, "munmap failed");
+	}
 }
 
 static void bail_out(int exitcode, const char *fmt, ...) {
@@ -71,43 +60,30 @@ static void bail_out(int exitcode, const char *fmt, ...) {
 		(void) vfprintf(stderr, fmt, ap);
 		va_end(ap);
 	}
-	if (errno != 0) {
+	if (exitcode == errno && errno != 0) {
 		(void) fprintf(stderr, ": %s", strerror(errno));
 	}
 	(void) fprintf(stderr, "\n");
 
-	free_resources();
 	exit(exitcode);
 }
 
 static void open_semaphores(void) {
-	new_game = sem_open(SEM_1, 0);
-	if (new_game == SEM_FAILED) {
+	server = sem_open(SEM_1, 0);
+	if (server == SEM_FAILED) {
 		bail_out(errno, "could not open semaphore s1");
 	}	
-	player_ready = sem_open(SEM_2, 0);
-	if (player_ready == SEM_FAILED) {
+	player1 = sem_open(SEM_2, 0);
+	if (player1 == SEM_FAILED) {
 		bail_out(errno, "could not open semaphore s2");
-	}
-	client_round = sem_open(SEM_3, 0);
-	if (client_round == SEM_FAILED) {
+	}	
+	player2 = sem_open(SEM_3, 0);
+	if (player2 == SEM_FAILED) {
 		bail_out(errno, "could not open semaphore s3");
 	}	
-	server_round = sem_open(SEM_4, 0);
-	if (server_round == SEM_FAILED) {
+	new_game = sem_open(SEM_4, 0);
+	if (new_game == SEM_FAILED) {
 		bail_out(errno, "could not open semaphore s4");
-	}	
-	server_response = sem_open(SEM_5, 0);
-	if (server_response == SEM_FAILED) {
-		bail_out(errno, "could not open semaphore s5");
-	}	
-	player1 = sem_open(SEM_6, 0);
-	if (player1 == SEM_FAILED) {
-		bail_out(errno, "could not open semaphore s6");
-	}	
-	player2 = sem_open(SEM_7, 0);
-	if (player2 == SEM_FAILED) {
-		bail_out(errno, "could not open semaphore s7");
 	}	
 }
 
@@ -135,10 +111,130 @@ static void open_shared_memory(void) {
 		/* error */
 		bail_out(errno, "could not close shared memory file descriptor");
 	}
-
-	shmfd = -1; // TODO do i need this, copied from uli
 }
 
+static void check_server_alive(void) {
+	int shmfd = shm_open(SHM_NAME, O_RDWR, PERMISSION);
+	if (shmfd == -1) {
+		post_sem(new_game);
+		bail_out(EXIT_FAILURE, "Server is down!");
+	} else {
+		if (close(shmfd) == -1) {
+			bail_out(errno, "could not close shared memory file descriptor");
+		}	
+	}
+}
+
+static int is_in_field(int a) {
+	return a >= 0 && a <= 15;
+}
+
+static int is_vertical(int a, int b, int c) {
+	return (a == b+4 && b == c+4) || (a == b-4 && b == c-4);
+}
+
+static int is_horizontal(int a, int b, int c) {
+	return (a == b+1 && b == c+1) || (a == b-1 && b == c-1);
+}
+
+static int is_diagonal(int a, int b, int c) {
+	return (a == b+5 && b == c+5) || (a == b-5 && b == c-5) ||
+				 (a == b+3 && b == c+3) || (a == b-3 && b == c-3);
+}
+
+static void input_ship(struct ship *ship) {
+	int a = -1;
+	int b = -1;
+ 	int c = -1;
+	char buffer[100];
+
+	fprintf(stdout, "\nPlace your ship horizontal, vertical or diagonal on the field (eg: 9, 6, 3): ");
+	while (fgets(buffer, 100, stdin) != NULL) {
+    if (sscanf(buffer, "%d, %d, %d", &a, &b, &c) == 3) {
+			if (is_in_field(a) && is_in_field(b) && is_in_field(c)) {
+				if (is_vertical(a,b,c) || is_horizontal(a,b,c) || is_diagonal(a,b,c)) {
+					break;				
+				}			
+			}
+		}
+		fprintf(stdout, "Your input was invalid please try again: ");		
+	}
+	ship->a = a;
+	ship->b = b;
+	ship->c = c;
+	fprintf(stdout, "Placed ship at: %d, %d, %d\n", a,b,c);
+}
+
+static int read_input(void) {
+  int input;
+	char buffer[100];
+	while (fgets(buffer, 100, stdin) != NULL) {
+    if (sscanf(buffer, "%d", &input) == 1) {
+			if (is_in_field(input) || input == -1) {
+				break;			
+			} 
+  		fprintf (stdout, "Input invalid, please enter a number between -1 and 15: ");
+		}
+	}
+	return input;
+}
+
+static int get_valid_input(void) {
+	int input;
+	int valid = 0;
+	fprintf(stdout, "\nEnter a number between 0 and 15 to fire on the enemy ship\n");
+	fprintf(stdout, "Enter the number '-1' to give up\n\n");
+	fprintf (stdout, "Please enter a Number between -1 and 15: ");
+	while (valid == 0) {
+		input = read_input();
+		if (input < -1 || input > 15) {
+	  	fprintf (stdout, "Input invalid, please enter a number between -1 and 15: ");
+			continue;
+		}		
+		if (field[input] == FIELD_HIT || field[input] == FIELD_MISS) {
+			fprintf(stdout, "You already fired on this field, please enter a different number: ");
+			continue;
+		} else {
+			valid = 1;
+			field[input] = FIELD_SHOT_FIRED;		
+		}
+	} 
+	return input;
+}
+
+static void print_border(void) {
+	for (int i = 0; i <= 30; ++i) {
+		fprintf(stdout, "_");
+	}
+}
+
+static void print_map(void) {
+	print_border();
+	fprintf(stdout, "\n\n");
+	for (int i = 0; i <= sizeof(field)/sizeof(field[0]); ++i) {
+		char print_state[10];
+		int state = field[i];
+
+		if (state == FIELD_HIT) {
+			strcpy(print_state, "BOOM");
+		} else if (state == FIELD_MISS) {
+			strcpy(print_state, "MISS");
+		} else {
+			sprintf(print_state, "%d", i);		
+		}
+		fprintf(stdout, "%s\t", print_state);
+
+		if (((i+1) % 4) == 0) {
+			fprintf(stdout, "\n");
+			if (i != 15) {
+				fprintf(stdout, "\n");			
+			}		
+		}
+	} 
+	print_border();
+	fprintf(stdout, "\n");
+	return;	
+}
 
 /**
  * @brief Program entry point
@@ -155,99 +251,96 @@ int main(int argc, char **argv) {
 		bail_out(EXIT_FAILURE, "Usage: %s ", progname);		
 	}
 
+	if (atexit(free_resources) != 0) {
+		bail_out(errno, "atexit failed");
+	}
+
 	open_semaphores();
 	open_shared_memory();
 
-	// start
+	fprintf(stdout, "Waiting for game slot.\n");
 	wait_sem(new_game);
-	fprintf(stdout, "new game startet\n");
+	check_server_alive();
+	fprintf(stdout, "Got game slot - Waiting for other player.\n");
 	
-	post_sem(player_ready);
-
-	wait_sem(client_round);
+	post_sem(server);
+	int game_finished = 0;	
+	wait_sem(player1);
+	check_server_alive();
 
 	int playerid = shared->player;
 	sem_t *player, *other_player;
 	
-	struct ship myship;
-	//  0  1  2  3
-	//  4  5  6  7
-	//  8  9 10 11
-	// 12 13 14 15
+	struct ship *myship = &shared->player_ship;
 	
+	fprintf(stdout, "Game started!\n");
+	print_map();
+
+	input_ship(myship);	
+
 	if (playerid == PLAYER1) {
 		player = player1;
 		other_player = player2;
-		fprintf(stdout, "playing as player %d\n", PLAYER1);		
-		myship.a = 0;
-		myship.b = 5;
-		myship.c = 10;
 	} else {
-		fprintf(stdout, "playing as player %d\n", PLAYER2);
 		player = player2;	
 		other_player = player1;
-		myship.a = 7;
-		myship.b = 10;
-		myship.c = 13;
-	}
-	shared->playership = &mysh
-	post_sem(server_round);	
-	
-	for (int i = 0; i < 5; ++i) {
-		wait_sem(player);
-	
-		// save schuesse in array 
-	
-		fgets()
-	
-		fprintf(stdout, "get user input %d\n", i);
-	
-		post_sem(server_round);
-		wait_sem(player);
-		
-		// schuesse von array mit 0,1,2 makieren => BOOM, MISS, Number
-		
-		fprintf(stdout, "mark on map\n");
-		
-		post_sem(other_player);
-	}
-	
-	// end
-
-	fprintf(stdout, "client finished");
-	post_sem(new_game);
-
-//	for(int i = 0; i < 3; ++i) {
-//		semWait(s2);
-		/* critical section entry ... */
-//		shared->data[0]++;
-//		fprintf(stdout, "critical: data = %d\n", shared->data[0]);
-		/* critical section exit ... */
-//		semPost(s1);
-//	}
-
-	// TODO move to free resources
-	sem_close(new_game);
-	sem_close(player_ready); 
-	sem_close(client_round);
-	sem_close(server_round);
-	sem_close(server_response);
-//	sem_unlink(SEM_PLAYERS); 
-//	sem_unlink(SEM_2);
-	/* unmap shared memory */
-	if (munmap(shared, sizeof *shared) == -1) {
-		/* error */
-		bail_out(errno, "munmap failed");
 	}
 
-	/* remove shared memory object */
-	//if (shm_unlink(SHM_NAME) == -1) {
-		/* error */
-	//	bail_out(errno, "shm unlink failed");
-	//}
-	// TODO END
+	post_sem(server);	
+	fprintf(stdout, "\nWaiting for other player...\n");
+	wait_sem(player);
+	check_server_alive();
 
-	free_resources();
+	while (game_finished == 0) {
+		switch (shared->state) {
+			case STATE_GIVEN_UP:
+				fprintf(stdout, "The other player has given up - You Win!\n");
+				game_finished = 1;
+				break;
+			case STATE_GAME_LOST:
+				fprintf(stdout, "\nYou lost the Game.\n");
+				game_finished = 1;
+				break;
+			default:
+				;
+				int user_input = get_valid_input();
+				shared->player_shot = user_input;
+				if (user_input == -1) {
+					fprintf(stdout, "Giving up...\n");
+					shared->state = STATE_GIVEN_UP;		
+					game_finished = 1;
+					break;
+				}
 
+				post_sem(server);
+				wait_sem(player);
+				check_server_alive();
+
+				if (shared->was_hit == 1) {
+					field[user_input] = FIELD_HIT;			
+				} else {
+					field[user_input] = FIELD_MISS;
+				}
+				print_map();
+				if (field[user_input] == FIELD_HIT) {
+					fprintf(stdout, "\nYour shot was a HIT, nice job!\n");
+				} else {
+					fprintf(stdout, "\nYou missed, better luck next time!\n");
+				}
+
+				if (shared->state == STATE_GAME_WON) {
+					fprintf(stdout, "\nYou won the Game :)\n");				
+					game_finished = 1;
+				} else {
+					fprintf(stdout, "\nWaiting for other player...\n");
+					post_sem(other_player);
+					wait_sem(player);
+					check_server_alive();
+				}
+				break;				
+		}		
+	}
+	fprintf(stdout, "\nClient finished.\n");
+	post_sem(server);
 	return EXIT_SUCCESS;
 }

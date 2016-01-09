@@ -1,37 +1,49 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <stdarg.h>
+#include <string.h>
+#include <errno.h>
 
-#define MAX_CLIENTS 64
-#define MAX_WORDSIZE 128
-#define MAX_LISTSIZE 128
-#define MAX_TRIES 9
-#define ALPHABET 26
+#include <semaphore.h>
+#include <fcntl.h>
 
-#define STATE_ALIVE (1)
-#define STATE_OPEN (0)
-#define STATE_DEAD (-1)
-
-#define GAME_WIN (1)
-#define GAME_NONE (0)
-#define GAME_LOST (-1)
+#include <sys/mman.h>
+#include <unistd.h>
 
 #define SHM_NAME "/myshm"
 #define MAX_DATA (50)
 #define PERMISSION (0600)
 
-
 #define PLAYER1 (1)
 #define PLAYER2 (2)
 
-#define STATE_INIT (1)
-#define STATE_PLAYING (2)
+#define STATE_GAME (1)
+#define STATE_GIVEN_UP (4)
+#define STATE_GAME_WON (5)
+#define STATE_GAME_LOST (6)
 
+#define FIELD_MISS (1)
+#define FIELD_HIT (2)
+#define FIELD_SHOT_FIRED (3)
 
 #define SEM_1 "/sem_1"
 #define SEM_2 "/sem_2"
 #define SEM_3 "/sem_3"
 #define SEM_4 "/sem_4"
-#define SEM_5 "/sem_5"
-#define SEM_6 "/sem_6"
-#define SEM_7 "/sem_7"
+
+/* === Macros === */
+
+/**
+ * @brief print debug messages if the debug flag is set 
+ */
+#ifdef ENDEBUG
+#define DEBUG(...) do { fprintf(stderr, __VA_ARGS__); } while(0)
+#else
+#define DEBUG(...)
+#endif
+
+/* Length of an array */
+#define COUNT_OF(x) (sizeof(x)/sizeof(x[0]))
 
 /* === Prototypes === */
 
@@ -49,15 +61,10 @@ static void bail_out(int exitcode, const char *fmt, ...);
 
 struct battleships *shared;
 
-sem_t *new_game;
-sem_t *player_ready;
-sem_t *client_round;
-sem_t *server_round;
-sem_t *server_response;
-
+sem_t *server;
 sem_t *player1;
 sem_t *player2;
-
+sem_t *new_game;
 
 void wait_sem(sem_t *sem) {
 	if (sem_wait(sem) == -1) {
@@ -71,34 +78,17 @@ void post_sem(sem_t *sem) {
 	}
 }
 
-
-struct battleships {
-	unsigned int player;
-	unsigned int state;
-	unsigned int round;
-	unsigned int shoot;
-	struct ship *playership;
-};
-
 struct ship {
 	unsigned int a;
 	unsigned int b;
 	unsigned int c;
 };
 
-struct myhangman {
+struct battleships {
+	unsigned int player;
 	unsigned int state;
-	unsigned int tries;
-	unsigned int tip;
-	char tips[ALPHABET];
-	char word[MAX_WORDSIZE];
-	int wordnr;
-	int usedWords[MAX_LISTSIZE];
-	int winState;
-	
-	int wins;
-	int losses;
-	int end;
+	unsigned int round;
+	unsigned int player_shot;
+	unsigned int was_hit;
+	struct ship player_ship;
 };
-
-// TODO ALL REFACTOR!!
