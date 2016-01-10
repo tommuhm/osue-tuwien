@@ -10,19 +10,105 @@
  * @date 04.01.2016
  * 
  */
+#include <stdio.h>
+#include <stdlib.h>
+#include <stdarg.h>
+#include <string.h>
+#include <errno.h>
+#include <signal.h>
+
+#include <semaphore.h>
+#include <fcntl.h>
+
+#include <sys/mman.h>
+#include <unistd.h>
+
 #include "battleships.h"
 
 /* === Global Variables === */
 
-/** 4x4 gamefield, the values indicate a NOT_FIRED, HIT or MISS */ 
-static int field[15] = {0};
+/** battlefield structure in the shared memory - lock before use with memory semaphore! */
+struct battleships *shared;
 
+/** semphore for server turn */
+sem_t *server;
+
+/** semaphore for player1 turn */
+sem_t *player1;
+
+/** semaphore for player2 turn */
+sem_t *player2;
+
+/** semaphore for available game slots - 2 slots on init */
+sem_t *new_game;
+
+/** 4x4 gamefield, the values indicate a NOT_FIRED, HIT or MISS */ 
+static int field[16] = {0};
+
+/** flag which indicate that the game is running */
 static int game_running = 0;
 
 /** Name of the program */
 static const char *progname = "battleships-client"; /* default name */
 
+/* === Type Definitions === */
+
+/** structure for a ship */
+struct ship {
+	/** postion of the first element of the ship */
+	unsigned int a;
+	/** postion of the second element of the ship */
+	unsigned int b;
+	/** postion of the thirds element of the ship */
+	unsigned int c;
+};
+
+/** structure for the shared memory */
+struct battleships {
+	/** player_nr used in the initalised phase to assign semaphores - set by the server */
+	unsigned int player;
+	/** current state of the game - set by the server */
+	unsigned int state;
+	/** postion of the last player shot - set by the client */
+	unsigned int player_shot;
+	/** indicate if the last shot was a hit - set by the server */
+	unsigned int was_hit;
+	/** player ship created by the user during startup - set by the client */
+	struct ship player_ship;
+};
+
 /* === Prototypes === */
+
+/** free_resources
+ * @brief free allocated resources
+ */
+static void free_resources(void);
+
+/** print_error
+ *  @brief print error message
+ *  @param exitcode exit code
+ *  @param fmt format string
+ */
+static void print_error(int exitcode, const char *fmt, ...);
+
+/** bail_out
+ *  @brief print error message and terminate program
+ *  @param exitcode exit code
+ *  @param fmt format string
+ */
+static void bail_out(int exitcode, const char *fmt, ...);
+
+/**	post_sem
+ *	@brief post to semaphore and check for error
+ *	@param sem to post to
+ */
+static void post_sem(sem_t *sem);
+
+/**	wait_sem
+ *	@brief wait for semaphore and check for error
+ *	@param sem to wait for
+ */
+static void wait_sem(sem_t *sem);
 
 /**	open_semaphores
  *	@brief tires to open the semaphores which were created by the server
@@ -81,37 +167,34 @@ static int get_valid_input(void);
  */
 static void print_map(void);
 
-/**	wait_for_turn
- *	@brief wait for the turn of the specified player semaphore and lock memory if it begins
+/**	check_server_alive
+ *	@brief check if the server is still alive and terminate if not
  */
-static void wait_for_turn(sem_t *player);
-
-/**	turn_finished
- *	@brief free memory and send post to the next semaphore
- */
-static void turn_finished(sem_t *next);
-
-// TODO
-static void set_disconnected(void);
+static void check_server_alive(void);
 
 /* === Implementations === */
 
 void free_resources(void) {
-	if (sem_close(server) == -1) {
-		print_error(errno, "close server sem failed");
+	if(server != 0) {
+		if (sem_close(server) == -1) {
+			print_error(errno, "close server sem failed");
+		}
 	}
-	if (sem_close(player1) == -1) {
-		print_error(errno, "close player1 sem failed");
-	}	
-	if (sem_close(player2) == -1) {
-		print_error(errno, "close player2 sem failed");
+	if (player1 != 0) {
+		if (sem_close(player1) == -1) {
+			print_error(errno, "close player1 sem failed");
+		}	
 	}
-	if (sem_close(new_game) == -1) {
-		print_error(errno, "close new_game sem failed");
+	if (player2 != 0) {
+		if (sem_close(player2) == -1) {
+			print_error(errno, "close player2 sem failed");
+		}
 	}
-	if (sem_close(memory) == -1) {
-		print_error(errno, "close memory sem failed");
- 	}
+	if (new_game != 0) {
+		if (sem_close(new_game) == -1) {
+			print_error(errno, "close new_game sem failed");
+		}
+	}
 	/* unmap shared memory */
 	if (munmap(shared, sizeof *shared) == -1) {
 		print_error(errno, "munmap failed");
@@ -134,38 +217,24 @@ void print_error(int exitcode, const char *fmt, ...) {
 }
 
 void bail_out(int exitcode, const char *fmt, ...) {
-	print_error(exitcode, fmt);
+	va_list ap;
+
+	(void) fprintf(stderr, "%s: ", progname);
+	if (fmt != NULL) {
+		va_start(ap, fmt);
+		(void) vfprintf(stderr, fmt, ap);
+		va_end(ap);
+	}
+	if (exitcode == errno && errno != 0) {
+		(void) fprintf(stderr, ": %s", strerror(errno));
+	}
+	(void) fprintf(stderr, "\n");
 	exit(exitcode);
-}
-
-void setup_signal_handler(void) {
-    /* setup signal handlers */
-    const int signals[] = {SIGINT, SIGTERM};
-    struct sigaction s;
-
-    s.sa_handler = signal_handler;
-    s.sa_flags   = 0;
-    if(sigfillset(&s.sa_mask) < 0) {
-        bail_out(EXIT_FAILURE, "sigfillset");
-    }
-    for(int i = 0; i < COUNT_OF(signals); i++) {
-        if (sigaction(signals[i], &s, NULL) < 0) {
-            bail_out(EXIT_FAILURE, "sigaction");
-        }
-    }
-}
-
-void signal_handler(int sig) {
-	quit = 1;
 }
 
 void wait_sem(sem_t *sem) {
 	if (sem_wait(sem) == -1) {
-		if (errno == EINTR) {
-			//set_disconnected();
-		} else {
-			bail_out(errno, "sem_wait failed");
-		}
+		bail_out(errno, "sem_wait failed");
 	}
 }
 
@@ -175,44 +244,28 @@ void post_sem(sem_t *sem) {
 	}
 }
 
-static void wait_for_turn(sem_t *player) {
-	wait_sem(player);
-	if (!quit) {
-		wait_sem(memory);
-	}
-}
-
-static void turn_finished(sem_t *next) {
-	post_sem(memory);
-	post_sem(next);
-}
-
 static void open_semaphores(void) {
-	server = sem_open(SEM_1, 0);
+	server = sem_open(SEM_SERVER, 0);
 	if (server == SEM_FAILED) {
-		bail_out(errno, "could not open semaphore s1");
+		bail_out(errno, "could not open semaphore server");
 	}	
-	player1 = sem_open(SEM_2, 0);
+	player1 = sem_open(SEM_PLAYER1, 0);
 	if (player1 == SEM_FAILED) {
-		bail_out(errno, "could not open semaphore s2");
+		bail_out(errno, "could not open semaphore player1");
 	}	
-	player2 = sem_open(SEM_3, 0);
+	player2 = sem_open(SEM_PLAYER2, 0);
 	if (player2 == SEM_FAILED) {
-		bail_out(errno, "could not open semaphore s3");
+		bail_out(errno, "could not open semaphore player2");
 	}	
-	new_game = sem_open(SEM_4, 0);
+	new_game = sem_open(SEM_NEW_GAME, 0);
 	if (new_game == SEM_FAILED) {
-		bail_out(errno, "could not open semaphore s4");
-	}	
-	memory = sem_open(SEM_5, 0);
-	if (memory == SEM_FAILED) {
-		bail_out(errno, "could not open semaphore s5");
+		bail_out(errno, "could not open semaphore new game");
 	}	
 }
 
 static void open_shared_memory(void) {
 	/* create and/or open shared memory object */
-	int shmfd = shm_open(SHM_NAME, O_RDWR, PERMISSION);
+	int shmfd = shm_open(SHM_BATTLESHIPS, O_RDWR, PERMISSION);
 	if (shmfd == -1) {
 		bail_out(errno, "shm_open failed");
 	}
@@ -230,7 +283,7 @@ static void open_shared_memory(void) {
 }
 
 static void check_server_alive(void) {
-	int shmfd = shm_open(SHM_NAME, O_RDWR, PERMISSION);
+	int shmfd = shm_open(SHM_BATTLESHIPS, O_RDWR, PERMISSION);
 	if (shmfd == -1) {
 		post_sem(new_game);
 		bail_out(EXIT_FAILURE, "Server is down!");
@@ -250,12 +303,14 @@ static int is_vertical(int a, int b, int c) {
 }
 
 static int is_horizontal(int a, int b, int c) {
-	return (a == b+1 && b == c+1) || (a == b-1 && b == c-1);
+	return ((a/4) == (b/4) && (b/4) == (c/4)) && // same row
+				 ((a == b+1 && b == c+1) || (a == b-1 && b == c-1));
 }
 
 static int is_diagonal(int a, int b, int c) {
-	return (a == b+5 && b == c+5) || (a == b-5 && b == c-5) ||
-				 (a == b+3 && b == c+3) || (a == b-3 && b == c-3);
+	return ((a/4) != (b/4) && (b/4) != (c/4) && (a/4) != (c/4)) && // differnt row
+	 			 ((a == b+5 && b == c+5) || (a == b-5 && b == c-5) ||
+				 (a == b+3 && b == c+3) || (a == b-3 && b == c-3));
 }
 
 static struct ship input_ship() {
@@ -325,7 +380,7 @@ static void print_map(void) {
 		(void) fprintf(stdout, "_");
 	}
 	(void) fprintf(stdout, "\n\n");
-	for (int i = 0; i <= sizeof(field)/sizeof(field[0]); ++i) {
+	for (int i = 0; i < sizeof(field)/sizeof(field[0]); ++i) {
 		char print_state[10];
 		int state = field[i];
 
@@ -363,41 +418,33 @@ int main(int argc, char **argv) {
 		progname = argv[0];
 	}
 	if (argc != 1) {
-		bail_out(EXIT_FAILURE, "Usage: %s ", progname);		
+		bail_out(EXIT_FAILURE, "Usage: %s", progname);		
 	}
 	if (atexit(free_resources) != 0) {
 		bail_out(errno, "atexit failed");
 	}
-	setup_signal_handler();
-	open_semaphores();
 	open_shared_memory();
+	open_semaphores();
 
 	(void) fprintf(stdout, "Waiting for game slot.\n");
 	wait_sem(new_game);
 	check_server_alive();
 	game_running = 1;	
-	(void) fprintf(stdout, "Got game slot - Waiting for other player.\n");
-	
-	struct ship myship = input_ship(); // TODO evt andere postion
-
+	(void) fprintf(stdout, "Got game slot - Waiting for other player\n");
 	post_sem(server);
+	wait_sem(player1);
+	check_server_alive();
+	print_map();
+	struct ship myship = input_ship();
+
 	wait_sem(player2);
 	check_server_alive();
-
-	if (quit) {
-		return EXIT_SUCCESS;	
-	}
-	if (shared->state == STATE_CLIENT_DISCONNECTED) {
-		game_running = 0;	
-		(void) fprintf(stdout, "The other player has been disconnected - You Win!\n");
-	}
 
 	int playerid = shared->player;
 	sem_t *player, *other_player;
 	shared->player_ship = myship;
 	
 	(void) fprintf(stdout, "Game started!\n");
-	print_map();
 
 	if (playerid == PLAYER1) {
 		player = player1;
@@ -409,18 +456,13 @@ int main(int argc, char **argv) {
 
 	post_sem(server);
 	(void) fprintf(stdout, "\nWaiting for other player...\n");
-	wait_sem(server);
+	wait_sem(player);
 
 	while (game_running == 1) {
-		//check_other_disconnected();
 		check_server_alive();
 		int state = shared->state;
 
 		switch (state) {
-			case STATE_CLIENT_DISCONNECTED:
-				(void) fprintf(stdout, "The other player has been disconnected - You Win!\n");
-				game_running = 0;				
-				break;
 			case STATE_GIVEN_UP:
 				(void) fprintf(stdout, "The other player has given up - You Win!\n");
 				game_running = 0;

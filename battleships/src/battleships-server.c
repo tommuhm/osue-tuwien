@@ -10,9 +10,40 @@
  * @date 04.01.2016
  * 
  */
+#include <stdio.h>
+#include <stdlib.h>
+#include <stdarg.h>
+#include <string.h>
+#include <errno.h>
+#include <signal.h>
+
+#include <semaphore.h>
+#include <fcntl.h>
+
+#include <sys/mman.h>
+#include <unistd.h>
+
 #include "battleships.h"
 
 /* === Global Variables === */
+
+/** battlefield structure in the shared memory - lock before use with memory semaphore! */
+struct battleships *shared;
+
+/** semphore for server turn */
+sem_t *server;
+
+/** semaphore for player1 turn */
+sem_t *player1;
+
+/** semaphore for player2 turn */
+sem_t *player2;
+
+/** semaphore for available game slots - 2 slots on init */
+sem_t *new_game;
+
+/** this flag indicates if a SIGINT or a SIGTERM was caught */
+static volatile sig_atomic_t quit = 0;
 
 /** the location for the ship from player1 */
 static struct ship player1_ship;
@@ -26,13 +57,73 @@ static int player1_hits = 0;
 /** number of hits for player2 */
 static int player2_hits = 0;
 
-/** flag which indicate that the game has finished */
-static int game_finished;
+	/** flag which indicate that the game has finished */
+static int game_finished = 1;
+
+/** flag which indicate that the started successfully */
+static int server_started = 0;
 
 /** Name of the program */
 static const char *progname = "battleships-server"; /* default name */
 
+/* === Type Definitions === */
+
+/** structure for a ship */
+struct ship {
+	/** postion of the first element of the ship */
+	unsigned int a;
+	/** postion of the second element of the ship */
+	unsigned int b;
+	/** postion of the thirds element of the ship */
+	unsigned int c;
+};
+
+/** structure for the shared memory */
+struct battleships {
+	/** player_nr used in the initalised phase to assign semaphores - set by the server */
+	unsigned int player;
+	/** current state of the game - set by the server */
+	unsigned int state;
+	/** postion of the last player shot - set by the client */
+	unsigned int player_shot;
+	/** indicate if the last shot was a hit - set by the server */
+	unsigned int was_hit;
+	/** player ship created by the user during startup - set by the client */
+	struct ship player_ship;
+};
+
 /* === Prototypes === */
+
+/** free_resources
+ * @brief free allocated resources
+ */
+static void free_resources(void);
+
+/** print_error
+ *  @brief print error message
+ *  @param exitcode exit code
+ *  @param fmt format string
+ */
+static void print_error(int exitcode, const char *fmt, ...);
+
+/** bail_out
+ *  @brief print error message and terminate program
+ *  @param exitcode exit code
+ *  @param fmt format string
+ */
+static void bail_out(int exitcode, const char *fmt, ...);
+
+/**	post_sem
+ *	@brief post to semaphore and check for error
+ *	@param sem to post to
+ */
+static void post_sem(sem_t *sem);
+
+/**	wait_sem
+ *	@brief wait for semaphore and check for error
+ *	@param sem to wait for
+ */
+static void wait_sem(sem_t *sem);
 
 /**	create_semaphores
  *	@brief tires to create the semaphores for the server-client communication
@@ -43,6 +134,17 @@ static void create_semaphores(void);
  *	@brief tires to create the shared memory
  */
 static void create_shared_memory(void);
+
+/** signal_handler
+ *  @brief Signal handler
+ *  @param sig Signal number catched
+ */
+static void signal_handler(int sig);
+
+/** setup_signal_handler
+ *  @brief setup the signal handler for SIGINT and SIGTERM signals
+ */
+static void setup_signal_handler(void);
 
 /**	is_hit
  *	@brief check if the shot of player hit the enemey ship
@@ -59,58 +161,56 @@ static int has_won(int player, int is_hit);
  */
 static void calc_result(int player_nr, sem_t *player_sem, sem_t *other_player_sem);
 
-/**	wait_for_turn
- *	@brief wait for the turn of the server and lock the memory if it begins
- */
-static void wait_for_turn();
-
-/**	turn_finished
- *	@brief free memory and send post to the next semaphore
- */
-static void turn_finished(sem_t *next);
-
 /* === Implementations === */
 
 void free_resources(void) {
-	/* unmap shared memory */
-	if (munmap(shared, sizeof *shared) == -1) {
-		print_error(errno, "munmap failed");
+	if (server_started == 1) {
+		/* unmap shared memory */
+		if (munmap(shared, sizeof *shared) == -1) {
+			print_error(errno, "munmap failed");
+		}
+		/* remove shared memory object */
+		if (shm_unlink(SHM_BATTLESHIPS) == -1) {
+			print_error(errno, "shm unlink failed");
+		}
+		post_sem(new_game);
+		post_sem(player1);
+		post_sem(player2);
+		post_sem(player2);
 	}
-	/* remove shared memory object */
-	if (shm_unlink(SHM_NAME) == -1) {
-		print_error(errno, "shm unlink failed");
+	if(server != 0) {
+		if (sem_close(server) == -1) {
+			print_error(errno, "close server sem failed");
+		}
 	}
-
-	if (sem_close(server) == -1) {
-		print_error(errno, "close server sem failed");
+	if (player1 != 0) {
+		if (sem_close(player1) == -1) {
+			print_error(errno, "close player1 sem failed");
+		}	
 	}
-	if (sem_close(player1) == -1) {
-		print_error(errno, "close player1 sem failed");
-	}	
-	if (sem_close(player2) == -1) {
-		print_error(errno, "close player2 sem failed");
+	if (player2 != 0) {
+		if (sem_close(player2) == -1) {
+			print_error(errno, "close player2 sem failed");
+		}
 	}
-	if (sem_close(new_game) == -1) {
-		print_error(errno, "close new_game sem failed");
+	if (new_game != 0) {
+		if (sem_close(new_game) == -1) {
+			print_error(errno, "close new_game sem failed");
+		}
 	}
-	if (sem_close(memory) == -1) {
-		print_error(errno, "close memory sem failed");
- 	}
-
-	if (sem_unlink(SEM_1) == -1) {
-		print_error(errno, "unlink sem1 failed");
-	}
-	if (sem_unlink(SEM_2) == -1) {
-		print_error(errno, "unlink sem2 failed");
-	}
-	if (sem_unlink(SEM_3) == -1) {
-		print_error(errno, "unlink sem3 failed");
-	}
-	if (sem_unlink(SEM_4) == -1) {
-		print_error(errno, "unlink sem4 failed");
-	}
-	if (sem_unlink(SEM_5) == -1) {
-		print_error(errno, "unlink sem5 failed");
+	if (server_started == 1) {
+		if (sem_unlink(SEM_SERVER) == -1) {
+			print_error(errno, "unlink sem server failed");
+		}
+		if (sem_unlink(SEM_PLAYER1) == -1) {
+			print_error(errno, "unlink sem player1 failed");
+		}
+		if (sem_unlink(SEM_PLAYER2) == -1) {
+			print_error(errno, "unlink sem player2 failed");
+		}
+		if (sem_unlink(SEM_NEW_GAME) == -1) {
+			print_error(errno, "unlink sem new game failed");
+		}
 	}
 }
 
@@ -130,7 +230,18 @@ void print_error(int exitcode, const char *fmt, ...) {
 }
 
 void bail_out(int exitcode, const char *fmt, ...) {
-	print_error(exitcode, fmt);
+	va_list ap;
+
+	(void) fprintf(stderr, "%s: ", progname);
+	if (fmt != NULL) {
+		va_start(ap, fmt);
+		(void) vfprintf(stderr, fmt, ap);
+		va_end(ap);
+	}
+	if (exitcode == errno && errno != 0) {
+		(void) fprintf(stderr, ": %s", strerror(errno));
+	}
+	(void) fprintf(stderr, "\n");
 	exit(exitcode);
 }
 
@@ -157,7 +268,11 @@ void signal_handler(int sig) {
 
 void wait_sem(sem_t *sem) {
 	if (sem_wait(sem) == -1) {
-		bail_out(errno, "sem_wait failed");
+		if (errno == EINTR) {
+			bail_out(EXIT_SUCCESS, "got signal - server shutting down");
+		} else {
+			bail_out(errno, "sem_wait failed");
+		}
 	}
 }
 
@@ -167,43 +282,28 @@ void post_sem(sem_t *sem) {
 	}
 }
 
-/*
-static void wait_for_turn() {
-	wait_sem(server);
-	wait_sem(memory);
-}
-
-static void turn_finished(sem_t *next) {
-	post_sem(memory);
-	post_sem(next);
-}*/
-
 static void create_semaphores(void) {
-	server = sem_open(SEM_1, O_CREAT | O_EXCL, PERMISSION, 0);
+	server = sem_open(SEM_SERVER, O_CREAT | O_EXCL, PERMISSION, 0);
 	if (server == SEM_FAILED) {
-		bail_out(errno, "could not create semaphore s1");
+		bail_out(errno, "could not create semaphore server");
 	}
-	player1 = sem_open(SEM_2, O_CREAT | O_EXCL, PERMISSION, 0);
+	player1 = sem_open(SEM_PLAYER1, O_CREAT | O_EXCL, PERMISSION, 0);
 	if (player1 == SEM_FAILED) {
-		bail_out(errno, "could not create semaphore s2");
+		bail_out(errno, "could not create semaphore player1");
 	}
-	player2 = sem_open(SEM_3, O_CREAT | O_EXCL, PERMISSION, 0);
+	player2 = sem_open(SEM_PLAYER2, O_CREAT | O_EXCL, PERMISSION, 0);
 	if (player2 == SEM_FAILED) {
-		bail_out(errno, "could not create semaphore s3");
+		bail_out(errno, "could not create semaphore player2");
 	}
-	new_game = sem_open(SEM_4, O_CREAT | O_EXCL, PERMISSION, 0);
+	new_game = sem_open(SEM_NEW_GAME, O_CREAT | O_EXCL, PERMISSION, 0);
 	if (new_game == SEM_FAILED) {
-		bail_out(errno, "could not create semaphore s4");
-	}
-	memory = sem_open(SEM_5, O_CREAT | O_EXCL, PERMISSION, 1);
-	if (memory == SEM_FAILED) {
-		bail_out(errno, "could not create semaphore s5");
+		bail_out(errno, "could not create semaphore new-game");
 	}
 }
 
 static void create_shared_memory(void) {
 	/* create and/or open shared memory object */
-	int shmfd = shm_open(SHM_NAME, O_RDWR | O_CREAT, PERMISSION);
+	int shmfd = shm_open(SHM_BATTLESHIPS, O_RDWR | O_CREAT, PERMISSION);
 	if (shmfd == -1) {
 		bail_out(errno, "shm_open failed");
 	}
@@ -252,10 +352,6 @@ static void calc_result(int player_nr, sem_t *player_sem, sem_t *other_player_se
 
 	int state = shared->state;
 	sem_t *next_player = other_player_sem;
-	if (state == STATE_CLIENT_DISCONNECTED) {
-		game_finished = 1;
-		(void) fprintf(stdout, "Player %d has disconnected\n", player_nr);
-	}
 	if (state == STATE_GIVEN_UP) {
 		game_finished = 1;
 		(void) fprintf(stdout, "Player %d has given up\n", player_nr);
@@ -292,7 +388,7 @@ int main(int argc, char **argv) {
 		progname = argv[0];
 	}
 	if (argc != 1) {
-		bail_out(EXIT_FAILURE, "Usage: %s ", progname);		
+		bail_out(EXIT_FAILURE, "Usage: %s", progname);	
 	}
 	if (atexit(free_resources) != 0) {
 		bail_out(errno, "atexit failed");
@@ -300,38 +396,32 @@ int main(int argc, char **argv) {
 	setup_signal_handler();
 	create_semaphores();
 	create_shared_memory();
+	server_started = 1;
 
 	while(quit == 0) {
 		post_sem(new_game);
 		post_sem(new_game);
 
 		game_finished = 0;
+		player1_hits = 0;
+		player2_hits = 0;
 		shared->state = STATE_GAME;
 
-		(void) fprintf(stdout, "Setting up game field 0 waiting for players.\n");
+		(void) fprintf(stdout, "Setting up game field - waiting for players.\n");
 
 		// wait for two players
 		wait_sem(server);
 		wait_sem(server);
-		if (shared->state == STATE_CLIENT_DISCONNECTED) {
-			(void) fprintf(stdout, "client has been disconnected - starting new game\n");
-			post_sem(player2);	// notify other player
-			wait_sem(server);
-			continue;						// start new game
-		}
 
 		(void) fprintf(stdout, "Got two players!\n");
 
-		/* get player 1 ship */
+		post_sem(player1);
+		post_sem(player1);
+		
 		shared->player = PLAYER1;
+		/* get player 1 ship */
 		post_sem(player2);
 		wait_sem(server);
-		if (shared->state == STATE_CLIENT_DISCONNECTED) {
-			(void) fprintf(stdout, "client has been disconnected - starting new game\n");
-			post_sem(player2);	// notify other player
-			wait_sem(server);
-			continue;						// start new game
-		}
 		(void) fprintf(stdout, "Player 1 ready.\n");	
 		player1_ship = shared->player_ship;
 
@@ -339,13 +429,6 @@ int main(int argc, char **argv) {
 		shared->player = PLAYER2;
 		post_sem(player2);
 		wait_sem(server);	
-		fprintf(stdout, "check disconnect\n");
-		if (shared->state == STATE_CLIENT_DISCONNECTED) {
-			(void) fprintf(stdout, "client has been disconnected - starting new game\n");
-			post_sem(player2);	// notify other player
-			wait_sem(server);
-			continue;						// start new game
-		}
 		(void) fprintf(stdout, "Player 2 ready.\n");
 		player2_ship = shared->player_ship;
 
