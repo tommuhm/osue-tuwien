@@ -27,6 +27,9 @@
 
 /* === Global Variables === */
 
+/** this flag indicates if a SIGINT or a SIGTERM was caught */
+static volatile sig_atomic_t quit = 0;
+
 /** battlefield structure in the shared memory - lock before use with memory semaphore! */
 struct battleships *shared;
 
@@ -172,9 +175,21 @@ static void print_map(void);
  */
 static void check_server_alive(void);
 
+/** signal_handler
+ *  @brief Signal handler
+ *  @param sig Signal number catched
+ */
+static void signal_handler(int sig);
+
+/** setup_signal_handler
+ *  @brief setup the signal handler for SIGINT and SIGTERM signals
+ */
+static void setup_signal_handler(void);
+
 /* === Implementations === */
 
 void free_resources(void) {
+	(void) fprintf(stdout, "freeing resources\n");
 	if(server != 0) {
 		if (sem_close(server) == -1) {
 			print_error(errno, "close server sem failed");
@@ -234,7 +249,11 @@ void bail_out(int exitcode, const char *fmt, ...) {
 
 void wait_sem(sem_t *sem) {
 	if (sem_wait(sem) == -1) {
-		bail_out(errno, "sem_wait failed");
+		if (errno == EINTR) {
+			bail_out(EXIT_FAILURE, "got signal - client shutting down");
+		} else {
+			bail_out(errno, "sem_wait failed");
+		}
 	}
 }
 
@@ -280,6 +299,27 @@ static void open_shared_memory(void) {
 	if (close(shmfd) == -1) {
 		bail_out(errno, "could not close shared memory file descriptor");
 	}
+}
+
+void setup_signal_handler(void) {
+    /* setup signal handlers */
+    const int signals[] = {SIGINT, SIGTERM};
+    struct sigaction s;
+
+    s.sa_handler = signal_handler;
+    s.sa_flags   = 0;
+    if(sigfillset(&s.sa_mask) < 0) {
+        bail_out(EXIT_FAILURE, "sigfillset");
+    }
+    for(int i = 0; i < COUNT_OF(signals); i++) {
+        if (sigaction(signals[i], &s, NULL) < 0) {
+            bail_out(EXIT_FAILURE, "sigaction");
+        }
+    }
+}
+
+void signal_handler(int sig) {
+	quit = 1;
 }
 
 static void check_server_alive(void) {
@@ -334,7 +374,9 @@ static struct ship input_ship() {
 	ship.a = a;
 	ship.b = b;
 	ship.c = c;
-	(void) fprintf(stdout, "Placed ship at: %d, %d, %d\n", a,b,c);
+	if (!quit) {
+		(void) fprintf(stdout, "Placed ship at: %d, %d, %d\n", a,b,c);
+	}
 	return ship;
 }
 
@@ -343,6 +385,9 @@ static int read_input(void) {
 	char buffer[100];
 	while (fgets(buffer, 100, stdin) != NULL) {
     if (sscanf(buffer, "%d", &input) == 1) {
+			if (quit) {
+				input = -1;			
+			}
 			if (is_in_field(input) || input == -1) {
 				break;			
 			} 
@@ -360,6 +405,9 @@ static int get_valid_input(void) {
 	(void) fprintf (stdout, "Please enter a Number between -1 and 15: ");
 	while (valid == 0) {
 		input = read_input();
+		if (quit) {
+			input = -1;		
+		}
 		if (input < -1 || input > 15) {
 	  	(void) fprintf (stdout, "Input invalid, please enter a number between -1 and 15: ");
 			continue;
@@ -423,6 +471,7 @@ int main(int argc, char **argv) {
 	if (atexit(free_resources) != 0) {
 		bail_out(errno, "atexit failed");
 	}
+	setup_signal_handler();
 	open_shared_memory();
 	open_semaphores();
 
@@ -440,11 +489,23 @@ int main(int argc, char **argv) {
 	wait_sem(player2);
 	check_server_alive();
 
+	if (shared->state == STATE_GIVEN_UP) {
+		game_running = 0;
+		(void) fprintf(stdout, "The other palyer has given up - You Win!\n");
+	}
+
+	if (quit) {
+		game_running = 0;
+		shared->state = STATE_GIVEN_UP;
+	}
+
+	if (shared->state != STATE_GIVEN_UP) {
+		(void) fprintf(stdout, "Game started!\n");
+	}
+	
 	int playerid = shared->player;
 	sem_t *player, *other_player;
 	shared->player_ship = myship;
-	
-	(void) fprintf(stdout, "Game started!\n");
 
 	if (playerid == PLAYER1) {
 		player = player1;
@@ -454,11 +515,13 @@ int main(int argc, char **argv) {
 		other_player = player1;
 	}
 
-	post_sem(server);
-	(void) fprintf(stdout, "\nWaiting for other player...\n");
-	wait_sem(player);
+	if (game_running) {	
+		post_sem(server);
+		(void) fprintf(stdout, "\nWaiting for other player...\n");
+		wait_sem(player);
+	}
 
-	while (game_running == 1) {
+	while (game_running && !quit) {
 		check_server_alive();
 		int state = shared->state;
 
@@ -473,7 +536,6 @@ int main(int argc, char **argv) {
 				break;
 			default: ;
 				int user_input = get_valid_input();
-				
 				if (user_input == -1) {
 					(void) fprintf(stdout, "Giving up...\n");
 					shared->state = STATE_GIVEN_UP;		

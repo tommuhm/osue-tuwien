@@ -269,7 +269,7 @@ void signal_handler(int sig) {
 void wait_sem(sem_t *sem) {
 	if (sem_wait(sem) == -1) {
 		if (errno == EINTR) {
-			bail_out(EXIT_SUCCESS, "got signal - server shutting down");
+			bail_out(EXIT_FAILURE, "got signal - server shutting down");
 		} else {
 			bail_out(errno, "sem_wait failed");
 		}
@@ -398,7 +398,7 @@ int main(int argc, char **argv) {
 	create_shared_memory();
 	server_started = 1;
 
-	while(quit == 0) {
+	while(!quit) {
 		post_sem(new_game);
 		post_sem(new_game);
 
@@ -423,22 +423,39 @@ int main(int argc, char **argv) {
 		post_sem(player2);
 		wait_sem(server);
 		(void) fprintf(stdout, "Player 1 ready.\n");	
-		player1_ship = shared->player_ship;
+
+		if (shared->state == STATE_GIVEN_UP) {
+			(void) fprintf(stdout, "Player 1 has given up.\n");
+			game_finished = 1;
+			post_sem(player2);
+		} else {
+			player1_ship = shared->player_ship;
+		}
 
 		/* get player 2 ship */
-		shared->player = PLAYER2;
-		post_sem(player2);
-		wait_sem(server);	
-		(void) fprintf(stdout, "Player 2 ready.\n");
-		player2_ship = shared->player_ship;
+		if (!game_finished) {
+			shared->player = PLAYER2;
+			post_sem(player2);
+			wait_sem(server);	
+			(void) fprintf(stdout, "Player 2 ready.\n");
 
-		/* run game turn based */
-		(void) fprintf(stdout, "Game startet.\n");
-		post_sem(player1);
+			if (shared->state == STATE_GIVEN_UP) {
+				(void) fprintf(stdout, "Player 2 has given up.\n");
+				game_finished = 1;
+				post_sem(player1);
+			} else {
+				player2_ship = shared->player_ship;
+			}
 
-		while(game_finished == 0) {
+			/* run game turn based */
+			if (!game_finished) {
+				(void) fprintf(stdout, "Game startet.\n");
+				post_sem(player1);
+			}
+		}
+		while(!game_finished) {
 			calc_result(PLAYER1, player1, player2);
-			if (game_finished == 1) {
+			if (game_finished) {
 				break;
 			}
 			calc_result(PLAYER2, player2, player1);
